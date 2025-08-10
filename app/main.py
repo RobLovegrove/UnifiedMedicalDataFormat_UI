@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -8,7 +8,6 @@ import os
 from typing import List, Optional
 
 from .models.medical_file import MedicalFile, Module
-from .importers.file_importer import FileImporter
 from .importers.umdf_importer import UMDFImporter
 from .schemas.schema_manager import SchemaManager
 from cpp_interface.umdf_interface import umdf_interface
@@ -23,7 +22,6 @@ templates = Jinja2Templates(directory="/Users/rob/Documents/CS/Dissertation/UMDF
 
 # Initialize managers
 schema_manager = SchemaManager()
-file_importer = FileImporter()
 umdf_importer = UMDFImporter()
 
 @app.get("/", response_class=HTMLResponse)
@@ -92,56 +90,6 @@ async def umdf_viewer_upload(request: Request, file: UploadFile = File(...)):
         
     except Exception as e:
         return {"error": str(e)}
-
-@app.get("/import")
-async def import_page(request: Request):
-    """Import page for adding new files."""
-    return templates.TemplateResponse("import.html", {"request": request})
-
-@app.post("/import/file")
-async def import_file(
-    file: UploadFile = File(...),
-    file_type: str = Form(...),
-    schema_id: Optional[str] = Form(None)
-):
-    """Import a file (FHIR, DICOM, image, etc.) into the medical format."""
-    try:
-        # Read file content
-        content = await file.read()
-        
-        # Handle other file types (UMDF files are redirected immediately)
-        try:
-            result = await file_importer.import_file(
-                content=content,
-                filename=file.filename,
-                file_type=file_type,
-                schema_id=schema_id
-            )
-            
-            return {"success": True, "message": f"File imported successfully", "data": result}
-        except Exception as e:
-            return {"success": False, "message": str(e)}
-    
-    except Exception as e:
-        return {"success": False, "message": str(e)}
-
-@app.post("/import/dicom-folder")
-async def import_dicom_folder(
-    folder_path: str = Form(...),
-    schema_id: Optional[str] = Form(None)
-):
-    """Import a folder of DICOM files as a 3D volume."""
-    try:
-        # Import DICOM folder
-        result = await file_importer.import_dicom_folder(
-            folder_path=folder_path,
-            schema_id=schema_id
-        )
-        
-        return {"success": True, "message": f"DICOM folder imported successfully", "data": result}
-    
-    except Exception as e:
-        return {"success": False, "message": str(e)}
 
 @app.post("/write/umdf")
 async def write_umdf_file(

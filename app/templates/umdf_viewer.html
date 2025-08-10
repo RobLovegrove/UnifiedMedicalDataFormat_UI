@@ -3,6 +3,139 @@
 {% block title %}UMDF Viewer{% endblock %}
 
 {% block content %}
+<style>
+    .dimension-controls input[type="range"] {
+        -webkit-appearance: none !important;
+        appearance: none !important;
+        background: #343a40 !important;
+        border-radius: 3px;
+        height: 8px;
+        outline: none;
+        cursor: pointer;
+        width: 150px;
+        margin: 10px 0;
+        border: none;
+    }
+    
+    .dimension-controls input[type="range"]::-webkit-slider-track {
+        -webkit-appearance: none !important;
+        appearance: none !important;
+        background: #343a40 !important;
+        height: 8px;
+        border-radius: 3px;
+        border: none;
+    }
+    
+    .dimension-controls input[type="range"]::-moz-range-track {
+        background: #343a40 !important;
+        height: 8px;
+        border-radius: 3px;
+        border: none;
+    }
+    
+    .dimension-controls input[type="range"]::-ms-track {
+        background: #343a40 !important;
+        height: 8px;
+        border-radius: 3px;
+        border: none;
+    }
+    
+    .dimension-controls input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        background: #007bff;
+        border-radius: 50%;
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+        border: 2px solid #fff;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        margin-top: -5px;
+    }
+    
+    .dimension-controls input[type="range"]::-moz-range-thumb {
+        background: #007bff;
+        border-radius: 50%;
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+        border: 2px solid #fff;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    
+    .dimension-controls input[type="range"]::-ms-thumb {
+        background: #007bff;
+        border-radius: 50%;
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+        border: 1px solid #adb5bd;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    
+    .dimension-controls input[type="range"]:focus {
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+    }
+    
+    .dimension-controls .form-label {
+        font-weight: 500;
+        color: #495057;
+    }
+    
+    .dimension-controls .badge {
+        font-size: 0.75em;
+    }
+    
+    /* Custom Slider Styles */
+    .custom-slider {
+        position: relative;
+        width: 150px;
+        height: 20px;
+        margin: 10px 0;
+    }
+    
+    .slider-track {
+        position: relative;
+        width: 100%;
+        height: 8px;
+        background: #e9ecef;
+        border-radius: 4px;
+        cursor: pointer;
+        box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .slider-fill {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 100%;
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        border-radius: 4px;
+        transition: width 0.05s ease-out;
+        box-shadow: inset 0 1px 2px rgba(255,255,255,0.3);
+    }
+    
+    .slider-thumb {
+        position: absolute;
+        top: -6px;
+        width: 20px;
+        height: 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border: 3px solid #fff;
+        border-radius: 50%;
+        cursor: pointer;
+        box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+        transition: left 0.05s ease-out, transform 0.2s ease;
+    }
+    
+    .slider-thumb:hover {
+        background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+        transform: scale(1.15);
+        box-shadow: 0 6px 12px rgba(102, 126, 234, 0.4);
+    }
+</style>
+
 <!-- Import Dialog Overlay -->
 <div id="importDialog" class="position-fixed w-100 h-100 d-flex align-items-center justify-content-center" style="background-color: rgba(0, 0, 0, 0.5); z-index: 1050; top: 0; left: 0;">
     <div class="card" style="min-width: 400px;">
@@ -255,8 +388,95 @@ function updatePageWithFileData(data, isNewImport) {
                         </div>
                         
                         <div class="mt-3">
-                            <h6>Module Data</h6>
-                            <pre class="bg-light p-2 rounded" style="max-height: 300px; overflow-y: auto;">${JSON.stringify(module.data || {}, null, 2)}</pre>
+                            ${(() => {
+                                console.log('Module type:', module.type, 'Type of:', typeof module.type);
+                                const isImageModule = module.type && (
+                                    module.type.toLowerCase().includes('image') || 
+                                    module.type.toLowerCase().includes('dicom') ||
+                                    module.type.toLowerCase().includes('imaging') ||
+                                    module.type.toLowerCase().includes('pixel')
+                                );
+                                console.log('Is image module:', isImageModule);
+                                return isImageModule ? 
+                                    `<h6>Image Viewer</h6>
+                                    <div class="text-center p-4 bg-light rounded">
+                                        <div class="d-flex align-items-start justify-content-center">
+                                            <div class="image-viewer-container me-3" style="display: inline-block; border: 2px solid #dee2e6; border-radius: 8px; overflow: hidden; background: linear-gradient(45deg, #f8f9fa 25%, transparent 25%), linear-gradient(-45deg, #f8f9fa 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f8f9fa 75%), linear-gradient(-45deg, transparent 75%, #f8f9fa 75%); background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0px;">
+                                                <div class="image-placeholder" style="display: flex; align-items: center; justify-content: center; color: #6c757d; font-size: 14px; min-width: 200px; min-height: 150px; ${getImageViewerStyle(module.data, module.metadata)}">
+                                                    <div class="text-center">
+                                                        <i class="fas fa-image fa-2x mb-2"></i>
+                                                        <p class="mb-1">Image viewer will be implemented here</p>
+                                                        ${(() => {
+                                                            const imageInfo = getImageInfo(module.data, module.metadata);
+                                                            return `
+                                                                <p class="small mb-1">Dimensions: ${imageInfo.dimensions}</p>
+                                                                <p class="small mb-1">Number of Dimensions: ${imageInfo.numDimensions}</p>
+                                                                <p class="small">Number of Frames: ${imageInfo.numFrames}</p>
+                                                            `;
+                                                        })()}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            ${(() => {
+                                                const imageInfo = getImageInfo(module.data, module.metadata);
+                                                if (imageInfo.numDimensions <= 2) return '';
+                                                
+                                                // Get the additional dimensions (skip first two which are width and height)
+                                                let additionalDims = [];
+                                                if (module.metadata && module.metadata.dimensions && Array.isArray(module.metadata.dimensions)) {
+                                                    additionalDims = module.metadata.dimensions.slice(2);
+                                                } else if (module.data && module.data.dimensions && Array.isArray(module.data.dimensions)) {
+                                                    additionalDims = module.data.dimensions.slice(2);
+                                                } else if (module.data && module.data.size && Array.isArray(module.data.size)) {
+                                                    additionalDims = module.data.size.slice(2);
+                                                }
+                                                
+                                                if (additionalDims.length === 0) return '';
+                                                
+                                                // Create sliders for each additional dimension
+                                                const sliderHtml = additionalDims.map((dim, index) => {
+                                                    // Get dimension names from metadata, fallback to generic names
+                                                    const dimensionNames = module.metadata?.dimension_names || 
+                                                                         module.data?.dimension_names || 
+                                                                         ['Slice', 'Time', 'Channel', 'Phase', 'Echo'];
+                                                    // Use the same index as the dimensions array (index + 2 since we're starting from the 3rd dimension)
+                                                    const dimName = dimensionNames[index + 2] || `Dimension ${index + 3}`;
+                                                    return `
+                                                        <div class="mb-4 d-flex align-items-center">
+                                                            <div class="me-4" style="min-width: 80px;">
+                                                                <label class="form-label small mb-0">${dimName}:</label>
+                                                            </div>
+                                                            <div class="me-4">
+                                                                <span class="badge bg-secondary">0-${dim - 1}</span>
+                                                            </div>
+                                                            <div class="custom-slider me-4" data-dimension="${index + 2}" data-module-id="${module.id || 'unknown'}">
+                                                                <div class="slider-track">
+                                                                    <div class="slider-fill" style="width: 0%"></div>
+                                                                    <div class="slider-thumb" style="left: 0%"></div>
+                                                                </div>
+                                                                <input type="hidden" class="slider-value" value="0" min="0" max="${dim - 1}">
+                                                            </div>
+                                                            <div class="small text-muted" style="min-width: 80px;">
+                                                                Current: <span class="current-value">0</span>
+                                                            </div>
+                                                        </div>
+                                                    `;
+                                                }).join('');
+                                                
+                                                return `
+                                                    <div class="dimension-controls" style="min-width: 150px;">
+                                                        <h6 class="small mb-2">Dimension Controls</h6>
+                                                        ${sliderHtml}
+                                                    </div>
+                                                `;
+                                            })()}
+                                        </div>
+                                        <p class="small text-muted mt-2">Module Type: ${module.type}</p>
+                                    </div>` 
+                                    : 
+                                    `<h6>Module Data</h6>
+                                    <pre class="bg-light p-2 rounded" style="max-height: 300px; overflow-y: auto;">${JSON.stringify(module.data || {}, null, 2)}</pre>`;
+                            })()}
                         </div>
                     </div>
                 </div>
@@ -281,6 +501,193 @@ function updatePageWithFileData(data, isNewImport) {
         if (isNewImport) {
             showSuccess('File processed successfully, but no modules were found.');
         }
+    }
+}
+
+function getImageDimensions(moduleData, moduleMetadata) {
+    if (!moduleData && !moduleMetadata) return 'Unknown';
+    
+    try {
+        // First try to get dimensions from metadata
+        if (moduleMetadata && moduleMetadata.dimensions) {
+            const dims = moduleMetadata.dimensions;
+            if (Array.isArray(dims) && dims.length >= 2) {
+                return `${dims[0]} × ${dims[1]}`;
+            }
+            if (typeof dims === 'object' && dims.width && dims.height) {
+                return `${dims.width} × ${dims.height}`;
+            }
+        }
+        
+        // Fallback to module data if metadata doesn't have dimensions
+        if (moduleData) {
+            if (moduleData.width && moduleData.height) {
+                return `${moduleData.width} × ${moduleData.height}`;
+            }
+            if (moduleData.dimensions) {
+                const dims = moduleData.dimensions;
+                if (Array.isArray(dims) && dims.length >= 2) {
+                    return `${dims[0]} × ${dims[1]}`;
+                }
+                if (typeof dims === 'object' && dims.width && dims.height) {
+                    return `${dims.width} × ${dims.height}`;
+                }
+            }
+            if (moduleData.rows && moduleData.columns) {
+                return `${moduleData.columns} × ${moduleData.rows}`;
+            }
+            if (moduleData.size && Array.isArray(moduleData.size)) {
+                return `${moduleData.size[0] || '?'} × ${moduleData.size[1] || '?'}`;
+            }
+        }
+        
+        return 'Unknown dimensions';
+    } catch (e) {
+        return 'Error reading dimensions';
+    }
+}
+
+function getImageInfo(moduleData, moduleMetadata) {
+    if (!moduleData && !moduleMetadata) return { dimensions: 'Unknown', numDimensions: 0, numFrames: 0 };
+    
+    try {
+        let dimensions = 'Unknown';
+        let numDimensions = 0;
+        let numFrames = 0;
+        
+        console.log('Calculating image info for:', { moduleData, moduleMetadata });
+        
+        // First try to get dimensions from metadata
+        if (moduleMetadata && moduleMetadata.dimensions) {
+            const dims = moduleMetadata.dimensions;
+            console.log('Found dimensions in metadata:', dims);
+            if (Array.isArray(dims)) {
+                numDimensions = dims.length;
+                if (dims.length >= 2) {
+                    dimensions = `${dims[0]} × ${dims[1]}`;
+                    if (dims.length === 2) {
+                        // 2D image - only 1 frame
+                        numFrames = 1;
+                    } else {
+                        // 3D+ image - calculate frames from additional dimensions
+                        // First two dimensions are width and height, rest contribute to frame count
+                        numFrames = 1;
+                        for (let i = 2; i < dims.length; i++) {
+                            numFrames *= dims[i];
+                        }
+                    }
+                }
+            } else if (typeof dims === 'object' && dims.width && dims.height) {
+                dimensions = `${dims.width} × ${dims.height}`;
+                numDimensions = 2;
+                numFrames = 1;
+            }
+        }
+        
+        // Fallback to module data if metadata doesn't have dimensions
+        if (numDimensions === 0 && moduleData) {
+            console.log('Checking module data for dimensions');
+            if (moduleData.width && moduleData.height) {
+                dimensions = `${moduleData.width} × ${moduleData.height}`;
+                numDimensions = 2;
+                numFrames = 1;
+            } else if (moduleData.dimensions) {
+                const dims = moduleData.dimensions;
+                console.log('Found dimensions in module data:', dims);
+                if (Array.isArray(dims)) {
+                    numDimensions = dims.length;
+                    if (dims.length >= 2) {
+                        dimensions = `${dims[0]} × ${dims[1]}`;
+                        if (dims.length === 2) {
+                            numFrames = 1;
+                        } else {
+                            numFrames = 1;
+                            for (let i = 2; i < dims.length; i++) {
+                                numFrames *= dims[i];
+                            }
+                        }
+                    }
+                } else if (typeof dims === 'object' && dims.width && dims.height) {
+                    dimensions = `${dims.width} × ${dims.height}`;
+                    numDimensions = 2;
+                    numFrames = 1;
+                }
+            } else if (moduleData.rows && moduleData.columns) {
+                dimensions = `${moduleData.columns} × ${moduleData.rows}`;
+                numDimensions = 2;
+                numFrames = 1;
+            } else if (moduleData.size && Array.isArray(moduleData.size)) {
+                numDimensions = moduleData.size.length;
+                if (moduleData.size.length >= 2) {
+                    dimensions = `${moduleData.size[0] || '?'} × ${moduleData.size[1] || '?'}`;
+                    if (moduleData.size.length === 2) {
+                        numFrames = 1;
+                    } else {
+                        numFrames = 1;
+                        for (let i = 2; i < moduleData.size.length; i++) {
+                            numFrames *= moduleData.size[i];
+                        }
+                    }
+                }
+            }
+        }
+        
+        const result = { dimensions, numDimensions, numFrames };
+        console.log('Image info calculation result:', result);
+        return result;
+    } catch (e) {
+        console.error('Error calculating image info:', e);
+        return { dimensions: 'Error reading dimensions', numDimensions: 0, numFrames: 0 };
+    }
+}
+
+function getImageViewerStyle(moduleData, moduleMetadata) {
+    try {
+        // First try to get dimensions from metadata
+        let width, height;
+        
+        if (moduleMetadata && moduleMetadata.dimensions) {
+            const dims = moduleMetadata.dimensions;
+            if (Array.isArray(dims) && dims.length >= 2) {
+                width = dims[0];
+                height = dims[1];
+            } else if (typeof dims === 'object' && dims.width && dims.height) {
+                width = dims.width;
+                height = dims.height;
+            }
+        }
+        
+        // Fallback to module data if metadata doesn't have dimensions
+        if (!width || !height) {
+            if (moduleData && moduleData.width && moduleData.height) {
+                width = moduleData.width;
+                height = moduleData.height;
+            } else if (moduleData && moduleData.dimensions) {
+                const dims = moduleData.dimensions;
+                if (Array.isArray(dims) && dims.length >= 2) {
+                    width = dims[0];
+                    height = dims[1];
+                } else if (typeof dims === 'object' && dims.width && dims.height) {
+                    width = dims.width;
+                    height = dims.height;
+                }
+            }
+        }
+        
+        if (width && height) {
+            // Scale down dimensions to fit nicely in the UI (max 400px for the larger dimension)
+            const maxSize = 400;
+            const scale = Math.min(maxSize / Math.max(width, height), 1);
+            const scaledWidth = Math.round(width * scale);
+            const scaledHeight = Math.round(height * scale);
+            
+            return `width: ${scaledWidth}px; height: ${scaledHeight}px;`;
+        }
+        
+        return '';
+    } catch (e) {
+        console.error('Error calculating image viewer style:', e);
+        return '';
     }
 }
 
@@ -374,5 +781,150 @@ function importNewFile() {
     // Redirect back to the home page to import a new file
     window.location.href = '/';
 }
+
+// Add event listeners for dimension sliders
+function setupDimensionSliders() {
+    // Use event delegation to handle sliders that are dynamically created
+    document.addEventListener('input', function(event) {
+        if (event.target.type === 'range' && event.target.hasAttribute('data-dimension')) {
+            const slider = event.target;
+            const dimension = parseInt(slider.getAttribute('data-dimension'));
+            const moduleId = slider.getAttribute('data-module-id');
+            const value = parseInt(slider.value);
+            
+            // Update the current value display
+            const currentValueSpan = slider.parentNode.querySelector('.current-value');
+            if (currentValueSpan) {
+                currentValueSpan.textContent = value;
+            }
+            
+            // Log the dimension change (this is where you'd update the image display)
+            console.log(`Module ${moduleId}: Dimension ${dimension} changed to ${value}`);
+            
+            // TODO: Update the image display based on the selected dimensions
+            // This would involve:
+            // 1. Getting the current values from all sliders
+            // 2. Calculating the frame index based on the selected dimensions
+            // 3. Updating the image viewer to show the selected frame
+            updateImageDisplay(moduleId, dimension, value);
+        }
+    });
+}
+
+function updateImageDisplay(moduleId, dimension, value) {
+    // This function will be called whenever a slider changes
+    // For now, just log the change - you can implement the actual image update logic here
+    
+    // Get all sliders for this module
+    const moduleSliders = document.querySelectorAll(`[data-module-id="${moduleId}"]`);
+    const currentValues = {};
+    
+    // Collect current values from all sliders
+    moduleSliders.forEach(slider => {
+        const dim = parseInt(slider.getAttribute('data-dimension'));
+        currentValues[dim] = parseInt(slider.value);
+    });
+    
+    console.log(`Updating image display for module ${moduleId}:`, currentValues);
+    
+    // TODO: Implement the actual image frame selection logic
+    // This would involve:
+    // 1. Calculating the frame index from the dimension values
+    // 2. Fetching the corresponding image data from the module
+    // 3. Updating the image viewer to display the selected frame
+}
+
+// Initialize sliders when the page loads
+document.addEventListener('DOMContentLoaded', function() {
+    setupDimensionSliders();
+});
+
+        // Event delegation for custom sliders
+        document.addEventListener('click', function(e) {
+            if (e.target.closest('.slider-track')) {
+                const slider = e.target.closest('.custom-slider');
+                const track = slider.querySelector('.slider-track');
+                const thumb = slider.querySelector('.slider-thumb');
+                const fill = slider.querySelector('.slider-fill');
+                const valueInput = slider.querySelector('.slider-value');
+                const currentValueSpan = slider.closest('.d-flex').querySelector('.current-value');
+                
+                const rect = track.getBoundingClientRect();
+                const clickX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+                const percentage = (clickX / rect.width) * 100;
+                
+                // Update visual elements with precise positioning
+                thumb.style.left = percentage + '%';
+                fill.style.width = percentage + '%';
+                
+                // Calculate and update value with proper rounding
+                const min = parseInt(valueInput.getAttribute('min'));
+                const max = parseInt(valueInput.getAttribute('max'));
+                const value = Math.round(min + (percentage / 100) * (max - min));
+                valueInput.value = value;
+                currentValueSpan.textContent = value;
+                
+                // Trigger update function
+                const moduleId = slider.getAttribute('data-module-id');
+                const dimension = parseInt(slider.getAttribute('data-dimension'));
+                updateImageDisplay(moduleId, dimension, value);
+            }
+        });
+        
+        // Drag functionality for sliders
+        document.addEventListener('mousedown', function(e) {
+            if (e.target.closest('.slider-thumb')) {
+                const thumb = e.target.closest('.slider-thumb');
+                const slider = thumb.closest('.custom-slider');
+                const track = slider.querySelector('.slider-track');
+                const fill = slider.querySelector('.slider-fill');
+                const valueInput = slider.querySelector('.slider-value');
+                const currentValueSpan = slider.closest('.d-flex').querySelector('.current-value');
+                
+                let isDragging = true;
+                
+                // Disable transitions during drag for instant response
+                thumb.style.transition = 'none';
+                fill.style.transition = 'none';
+                
+                function onMouseMove(e) {
+                    if (!isDragging) return;
+                    
+                    const rect = track.getBoundingClientRect();
+                    const mouseX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+                    const percentage = (mouseX / rect.width) * 100;
+                    
+                    // Update visual elements with precise positioning
+                    thumb.style.left = percentage + '%';
+                    fill.style.width = percentage + '%';
+                    
+                    // Calculate and update value with proper rounding
+                    const min = parseInt(valueInput.getAttribute('min'));
+                    const max = parseInt(valueInput.getAttribute('max'));
+                    const value = Math.round(min + (percentage / 100) * (max - min));
+                    valueInput.value = value;
+                    currentValueSpan.textContent = value;
+                    
+                    // Trigger update function
+                    const moduleId = slider.getAttribute('data-module-id');
+                    const dimension = parseInt(slider.getAttribute('data-dimension'));
+                    updateImageDisplay(moduleId, dimension, value);
+                }
+                
+                function onMouseUp() {
+                    isDragging = false;
+                    
+                    // Re-enable transitions after drag for smooth hover effects
+                    thumb.style.transition = '';
+                    fill.style.transition = '';
+                    
+                    document.removeEventListener('mousemove', onMouseMove);
+                    document.removeEventListener('mouseup', onMouseUp);
+                }
+                
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+            }
+        });
 </script>
 {% endblock %} 
