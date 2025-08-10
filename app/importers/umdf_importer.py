@@ -1,192 +1,125 @@
-import sys
 import os
 import json
+import tempfile
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-# Add cpp_interface to Python path
-cpp_interface_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'cpp_interface')
-if cpp_interface_path not in sys.path:
-    sys.path.insert(0, cpp_interface_path)
+# Add the project root to Python path to ensure cpp_interface is discoverable
+import sys
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-# Import the compiled UMDF module
 try:
-    import umdf_reader
+    from cpp_interface.umdf_interface import umdf_interface
+    print("Successfully imported UMDF interface")
 except ImportError as e:
-    print(f"Warning: Could not import umdf_reader module: {e}")
-    print(f"Python path: {sys.path}")
-    print(f"Looking for module in: {cpp_interface_path}")
-    umdf_reader = None
-
+    print(f"Warning: Could not import UMDF interface: {e}")
+    umdf_interface = None
 
 class UMDFImporter:
-    """Imports UMDF files using the C++ reader module."""
+    """Importer for UMDF files using the C++ reader."""
     
     def __init__(self):
-        self.reader = None
-        if umdf_reader:
-            self.reader = umdf_reader.Reader()
+        """Initialize the UMDF importer."""
+        self.interface = umdf_interface
     
     def can_import(self) -> bool:
-        """Check if the UMDF module is available."""
-        return umdf_reader is not None and self.reader is not None
+        """Check if UMDF import is available."""
+        return self.interface and self.interface.can_read()
     
     def import_file(self, file_content: bytes, filename: str) -> Dict[str, Any]:
         """Import a UMDF file and convert to internal module format."""
         if not self.can_import():
             raise ImportError("UMDF reader module not available")
         
-        # Write content to temporary file
-        temp_path = f"/tmp/{filename}"
-        with open(temp_path, 'wb') as f:
-            f.write(file_content)
-        
+        temp_file = None
         try:
-            # Read the file with the reader
-            if not self.reader.readFile(temp_path):
+            # Create temporary file with .umdf extension
+            temp_file = tempfile.NamedTemporaryFile(mode='wb', suffix='.umdf', delete=False)
+            temp_path = temp_file.name
+            
+            # Write file content
+            temp_file.write(file_content)
+            temp_file.close()
+            
+            print(f"Temporary file created: {temp_path}")
+            print(f"File size: {len(file_content)} bytes")
+            
+            # Read the file using the interface
+            print("Calling interface.read_file...")
+            file_data = self.interface.read_file(temp_path)
+            print(f"Interface read_file returned: {type(file_data)}")
+            
+            if not file_data:
+                print("Interface returned None or empty data")
                 raise RuntimeError(f"Failed to read UMDF file: {filename}")
             
-            # Get file info
-            file_info = umdf_reader.read_umdf_file(temp_path)
-            
-            # Get module IDs from the reader
-            module_ids = self.reader.getModuleIds()
+            print(f"File data received: {type(file_data)}")
+            if isinstance(file_data, dict):
+                print(f"Keys in file_data: {list(file_data.keys())}")
             
             # Convert to internal format
             modules = []
             
-            for module_id in module_ids:
-                try:
-                    # Use the convenience function to get module data
-                    module_data = umdf_reader.get_module_data(temp_path, module_id)
-                    
-                    # Convert to internal module format
-                    module = {
-                        "id": module_id,
-                        "name": f"UMDF_Module_{module_id}",
-                        "schema_id": self._determine_module_type_from_dict(module_data),
-                        "type": self._determine_module_type_from_dict(module_data),
-                        "schema_url": module_data.get('schema_url', 'unknown'),
-                        "metadata": self._extract_metadata_from_dict(module_data),
-                        "data": self._extract_data_from_dict(module_data),
-                        "created_at": datetime.now().isoformat(),
-                        "source_file": filename
-                    }
-                    
-                    modules.append(module)
-                    
-                except Exception as e:
-                    print(f"Warning: Failed to process module {module_id}: {e}")
-                    continue
+            # Extract modules from the file data
+            if 'modules' in file_data:
+                for module_data in file_data['modules']:
+                    try:
+                        module = {
+                            "id": module_data.get('id', 'unknown'),
+                            "name": module_data.get('name', f"UMDF_Module_{module_data.get('id', 'unknown')}"),
+                            "schema_id": module_data.get('schema_id', 'unknown'),
+                            "type": module_data.get('type', 'unknown'),
+                            "schema_url": module_data.get('schema_url', 'unknown'),
+                            "metadata": module_data.get('metadata', {}),
+                            "data": module_data.get('data', {}),
+                            "created_at": datetime.now().isoformat(),
+                            "source_file": filename
+                        }
+                        modules.append(module)
+                    except Exception as e:
+                        print(f"Warning: Failed to process module: {e}")
+                        continue
+                
+                print(f"Successfully processed {len(modules)} modules")
+            else:
+                print(f"No modules found in file_data. Available keys: {list(file_data.keys()) if isinstance(file_data, dict) else 'Not a dict'}")
             
             return {
                 "file_type": "umdf",
                 "file_path": filename,
                 "modules": modules,
-                "file_info": file_info,
-                "module_count": len(modules)
-            }
-            
-        finally:
-            # Clean up temporary file
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-    
-    def import_file_from_path(self, file_path: str) -> Dict[str, Any]:
-        """Import a UMDF file from a file path and convert to internal module format."""
-        if not self.can_import():
-            raise ImportError("UMDF reader module not available")
-        
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"UMDF file not found: {file_path}")
-        
-        try:
-            # Read the file with the reader
-            if not self.reader.readFile(file_path):
-                raise RuntimeError(f"Failed to read UMDF file: {file_path}")
-            
-            # Get file info
-            file_info = umdf_reader.read_umdf_file(file_path)
-            
-            # Get module IDs from the reader
-            module_ids = self.reader.getModuleIds()
-            
-            # Convert to internal module format
-            modules = []
-            
-            for module_id in module_ids:
-                try:
-                    # Use the convenience function to get module data
-                    module_data = umdf_reader.get_module_data(file_path, module_id)
-                    
-                    # Convert to internal module format
-                    module = {
-                        "id": module_id,
-                        "name": f"UMDF_Module_{module_id}",
-                        "schema_id": self._determine_module_type_from_dict(module_data),
-                        "type": self._determine_module_type_from_dict(module_data),
-                        "schema_url": module_data.get('schema_url', 'unknown'),
-                        "metadata": self._extract_metadata_from_dict(module_data),
-                        "data": self._extract_data_from_dict(module_data),
-                        "created_at": datetime.now().isoformat(),
-                        "source_file": file_path
-                    }
-                    
-                    modules.append(module)
-                    
-                except Exception as e:
-                    print(f"Warning: Failed to process module {module_id}: {e}")
-                    continue
-            
-            return {
-                "file_type": "umdf",
-                "file_path": file_path,
-                "modules": modules,
-                "file_info": file_info,
+                "file_info": file_data,
                 "module_count": len(modules)
             }
             
         except Exception as e:
-            print(f"Error importing UMDF file from path {file_path}: {e}")
-            raise
+            print(f"Error in import_file: {e}")
+            import traceback
+            traceback.print_exc()
+            raise RuntimeError(f"Failed to import UMDF file: {e}")
+            
+        finally:
+            # Clean up temporary file
+            if temp_file and os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                    print(f"Temporary file cleaned up: {temp_path}")
+                except Exception as cleanup_error:
+                    print(f"Warning: Failed to clean up temporary file {temp_path}: {cleanup_error}")
+    
+    def import_file_from_path(self, file_path: str) -> Dict[str, Any]:
+        """Import a UMDF file from a file path."""
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+        
+        with open(file_path, 'rb') as f:
+            file_content = f.read()
+        
+        return self.import_file(file_content, os.path.basename(file_path))
     
 
-    
-    def _determine_module_type_from_dict(self, module_data: Dict[str, Any]) -> str:
-        """Determine the module type based on the data dictionary."""
-        if isinstance(module_data, dict):
-            # Check metadata for modality
-            if 'metadata' in module_data and isinstance(module_data['metadata'], list):
-                for meta in module_data['metadata']:
-                    if isinstance(meta, dict) and 'modality' in meta:
-                        return 'imaging'
-            
-            # Check data for patient information
-            if 'data' in module_data and isinstance(module_data['data'], list):
-                if module_data['data'] and isinstance(module_data['data'][0], dict):
-                    first_item = module_data['data'][0]
-                    if 'patient_id' in first_item or 'name' in first_item:
-                        return 'patient'
-                    elif 'test_name' in first_item or 'value' in first_item:
-                        return 'lab_results'
-                    elif 'medication_name' in first_item or 'dosage' in first_item:
-                        return 'medication'
-        
-        return 'unknown'
-    
-    def _extract_metadata_from_dict(self, module_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract metadata from module data dictionary."""
-        metadata = {}
-        
-        if isinstance(module_data, dict):
-            # Extract metadata from the module_data structure
-            if 'metadata' in module_data and isinstance(module_data['metadata'], list):
-                # Flatten metadata list into single dict
-                for meta_item in module_data['metadata']:
-                    if isinstance(meta_item, dict):
-                        metadata.update(meta_item)
-        
-        return metadata
     
     def _extract_data_from_dict(self, module_data: Dict[str, Any]) -> Dict[str, Any]:
         """Extract the main data from module data dictionary."""

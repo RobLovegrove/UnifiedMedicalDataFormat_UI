@@ -1,0 +1,155 @@
+/* UMDFViewer now uses the same styling as HomePage */
+/* All styles are inherited from HomePage.css */
+
+/* Success and Error Bars */
+.success-bar,
+.error-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  padding: 1rem;
+  animation: slideUp 0.3s ease-out;
+}
+
+.success-bar .alert {
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.error-bar .alert {
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+/* Image Viewer Styling */
+.image-viewer-container {
+  background: #f8f9fa;
+  border: 2px dashed #dee2e6;
+  border-radius: 8px;
+  min-height: 300px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-viewer-placeholder {
+  text-align: center;
+  color: #6c757d;
+}
+
+/* Dimension Controls */
+.dimension-controls {
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #dee2e6;
+}
+
+.dimension-control label {
+  font-weight: 500;
+  color: #495057;
+}
+
+/* Custom Slider Styling */
+.form-range {
+  height: 6px;
+  background: #6c757d;
+  border-radius: 3px;
+  outline: none;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  background: #667eea;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  background: #667eea;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.form-range::-webkit-slider-track {
+  background: #6c757d;
+  border-radius: 3px;
+}
+
+.form-range::-moz-range-track {
+  background: #6c757d;
+  border-radius: 3px;
+}
+
+/* Processing Overlay */
+.processing-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.processing-content {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  max-width: 400px;
+  width: 90%;
+}
+
+.processing-content .spinner-border {
+  width: 3rem;
+  height: 3rem;
+}
+
+/* Module Cards */
+.card {
+  border: 1px solid #e9ecef;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.2s ease;
+}
+
+.card:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Module Data */
+.module-data pre {
+  background: #f8f9fa !important;
+  border: 1px solid #e9ecef;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+/* Button Styling */
+.btn-outline-primary:hover,
+.btn-outline-danger:hover {
+  transform: translateY(-1px);
+  transition: transform 0.2s ease;
+} 

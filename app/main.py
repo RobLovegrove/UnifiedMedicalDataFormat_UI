@@ -1,11 +1,10 @@
-from fastapi import FastAPI, Request, UploadFile, File, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from pathlib import Path
 import json
 import os
-from typing import List, Optional
+from typing import List
 
 from .models.medical_file import MedicalFile, Module
 from .importers.umdf_importer import UMDFImporter
@@ -14,82 +13,40 @@ from cpp_interface.umdf_interface import umdf_interface
 
 app = FastAPI(title="Medical File Format UI", version="1.0.0")
 
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+print("=== DEBUG: FastAPI App Created ===")
 
-# Templates
-templates = Jinja2Templates(directory="/Users/rob/Documents/CS/Dissertation/UMDF_UI/app/templates")
+# Mount static files for React app
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Initialize managers
 schema_manager = SchemaManager()
 umdf_importer = UMDFImporter()
 
-@app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    """Main page for the medical file format UI."""
-    return templates.TemplateResponse("index.html", {"request": request})
-
-@app.get("/view/{file_id}")
-async def view_file(request: Request, file_id: str):
-    """View a medical file by ID."""
-    # TODO: Load file using C++ reader
-    # For now, return a placeholder
-    return templates.TemplateResponse("view.html", {
-        "request": request,
-        "file_id": file_id,
-        "modules": []
-    })
-
-@app.get("/umdf-viewer")
-async def umdf_viewer(request: Request):
-    """UMDF viewer page."""
-    # Get file path from query parameters
-    file_path = request.query_params.get('file', '')
-    file_name = request.query_params.get('name', '')
-    file_size = request.query_params.get('size', '')
-    
-    file_info = {
-        "file_path": file_path,
-        "file_name": file_name,
-        "file_size": file_size,
-        "file_type": "UMDF",
-        "module_count": 0,
-        "modules": []
-    }
-    
-    # If we have a file path, try to read it with the C++ module
-    if file_path:
-        try:
-            # Import the UMDF file using the C++ module
-            result = umdf_importer.import_file_from_path(file_path)
-            if result and 'modules' in result:
-                file_info['modules'] = result['modules']
-                file_info['module_count'] = len(result['modules'])
-                file_info['file_data'] = result
-        except Exception as e:
-            file_info['error'] = str(e)
-            print(f"Error reading UMDF file: {e}")
-    
-    return templates.TemplateResponse("umdf_viewer.html", {
-        "request": request,
-        "file_info": file_info
-    })
-
-@app.post("/umdf-viewer")
-async def umdf_viewer_upload(request: Request, file: UploadFile = File(...)):
-    """Handle UMDF file upload directly in the viewer."""
+# API Routes first
+@app.post("/api/upload/umdf")
+async def upload_umdf_file(file: UploadFile = File(...)):
+    """Upload and process a UMDF file."""
+    print("=== DEBUG: /api/upload/umdf route registered ===")
     try:
+        if not file.filename.endswith('.umdf'):
+            raise HTTPException(status_code=400, detail="Only .umdf files are supported")
+        
         # Read file content
         file_content = await file.read()
         
         # Import the UMDF file
         result = umdf_importer.import_file(file_content, file.filename)
         
-        # Return the result as JSON
-        return result
+        return {
+            "success": True,
+            "file_name": file.filename,
+            "file_size": len(file_content),
+            "modules": result.get('modules', []),
+            "module_count": len(result.get('modules', []))
+        }
         
     except Exception as e:
-        return {"error": str(e)}
+        return {"success": False, "error": str(e)}
 
 @app.post("/write/umdf")
 async def write_umdf_file(
@@ -161,6 +118,26 @@ async def get_cpp_schemas():
     """Get schemas supported by the C++ implementation."""
     schemas = umdf_interface.get_supported_schemas()
     return {"schemas": schemas}
+
+@app.get("/test")
+async def test_route():
+    """Test route to debug route registration."""
+    return {"message": "Test route working"}
+
+# Catch-all route for React app (must be last)
+@app.get("/{full_path:path}")
+async def serve_react_app(request: Request, full_path: str):
+    """Serve the React app for all routes."""
+    # Skip API routes
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="API route not found")
+    
+    # Serve the React app
+    return FileResponse("static/index.html")
+
+print("=== DEBUG: All routes registered ===")
+for route in app.routes:
+    print(f"Route: {route.path} - Methods: {getattr(route, 'methods', 'N/A')}")
 
 if __name__ == "__main__":
     import uvicorn

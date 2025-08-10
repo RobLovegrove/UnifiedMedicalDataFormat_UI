@@ -2,82 +2,57 @@
 Python interface to the C++ UMDF reader/writer
 """
 
-import ctypes
 import os
 import sys
-from pathlib import Path
-from typing import Dict, Any, Optional, List
 import json
-from datetime import datetime
+from typing import Dict, Any, List, Optional
+from ctypes import cdll, c_char_p, c_void_p, c_int, c_size_t, c_double, POINTER, Structure, c_uint32, c_uint64, c_bool
+import numpy as np
+
+# Add the current directory to Python path for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
+try:
+    import umdf_reader
+    print("Successfully imported umdf_reader module")
+except ImportError as e:
+    print(f"Warning: Could not import umdf_reader module: {e}")
+    umdf_reader = None
 
 class UMDFInterface:
-    """Python interface to the C++ UMDF reader/writer."""
+    """Python wrapper for the C++ UMDF reader/writer library."""
     
     def __init__(self):
+        """Initialize the UMDF interface."""
         self._lib = None
-        self._load_library()
+        self._reader = None
+        
+        if umdf_reader:
+            try:
+                # Create a Reader instance
+                self._reader = umdf_reader.Reader()
+                print("Successfully created C++ Reader instance")
+            except Exception as e:
+                print(f"Warning: Could not create C++ Reader instance: {e}")
+                self._reader = None
     
-    def _load_library(self):
-        """Load the C++ library."""
+    def can_read(self) -> bool:
+        """Check if the C++ reader is available."""
+        return self._reader is not None
+    
+    def get_supported_schemas(self) -> List[str]:
+        """Get list of supported schemas."""
+        if not self.can_read():
+            return []
+        
         try:
-            # Try to load the compiled library
-            lib_path = Path(__file__).parent / "umdf_python.dylib"  # macOS
-            if not lib_path.exists():
-                lib_path = Path(__file__).parent / "umdf_python.so"  # Linux
-            if not lib_path.exists():
-                lib_path = Path(__file__).parent / "umdf_python.dll"  # Windows
-            
-            if lib_path.exists():
-                self._lib = ctypes.CDLL(str(lib_path))
-                self._setup_function_signatures()
-                print(f"✓ Loaded C++ UMDF library: {lib_path}")
-            else:
-                print(f"Warning: UMDF library not found at {lib_path}")
-                print("Using mock implementation for testing")
-                self._lib = None
-                
+            # This would need to be implemented in C++ if you want to expose schema info
+            return ["umdf", "dicom", "fhir"]  # Placeholder
         except Exception as e:
-            print(f"Warning: Could not load UMDF library: {e}")
-            print("Using mock implementation for testing")
-            self._lib = None
-    
-    def _setup_function_signatures(self):
-        """Setup function signatures for the C++ library."""
-        if not self._lib:
-            return
-            
-        # Define function signatures
-        self._lib.write_umdf_file.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
-        self._lib.write_umdf_file.restype = ctypes.c_bool
-        
-        self._lib.read_umdf_file.argtypes = [ctypes.c_char_p]
-        self._lib.read_umdf_file.restype = ctypes.c_bool
-        
-        self._lib.get_supported_schemas.argtypes = []
-        self._lib.get_supported_schemas.restype = ctypes.c_char_p
-        
-        self._lib.validate_schema.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
-        self._lib.validate_schema.restype = ctypes.c_bool
-    
-    def write_file(self, data: Dict[str, Any], output_path: str, 
-                   access_mode: str = "fail_if_exists") -> bool:
-        """
-        Write data to a UMDF file using the C++ writer.
-        
-        Args:
-            data: Dictionary containing module data
-            output_path: Path to output UMDF file
-            access_mode: File access mode ("fail_if_exists", "allow_update", "overwrite")
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        if self._lib:
-            # Use C++ implementation
-            return self._write_file_cpp(data, output_path, access_mode)
-        else:
-            # Use mock implementation for testing
-            return self._write_file_mock(data, output_path, access_mode)
+            print(f"Error getting schemas: {e}")
+            return []
     
     def read_file(self, file_path: str) -> Optional[Dict[str, Any]]:
         """
@@ -89,122 +64,160 @@ class UMDFInterface:
         Returns:
             Dictionary containing file data or None if failed
         """
-        if self._lib:
-            # Use C++ implementation
-            return self._read_file_cpp(file_path)
-        else:
-            # Use mock implementation for testing
-            return self._read_file_mock(file_path)
-    
-    def _write_file_cpp(self, data: Dict[str, Any], output_path: str, 
-                        access_mode: str) -> bool:
-        """Write file using C++ implementation."""
-        try:
-            # Convert data to JSON string for C++ processing
-            data_json = json.dumps(data).encode('utf-8')
-            output_path_bytes = output_path.encode('utf-8')
-            
-            # Call C++ function
-            result = self._lib.write_umdf_file(data_json, output_path_bytes)
-            return bool(result)
-        except Exception as e:
-            print(f"Error in C++ write: {e}")
-            return False
-    
-    def _read_file_cpp(self, file_path: str) -> Optional[Dict[str, Any]]:
-        """Read file using C++ implementation."""
-        try:
-            file_path_bytes = file_path.encode('utf-8')
-            
-            # Call C++ function
-            result = self._lib.read_umdf_file(file_path_bytes)
-            if result:
-                # TODO: Implement data extraction from C++ reader
-                return {"status": "success", "message": "File read successfully"}
-            else:
-                return None
-        except Exception as e:
-            print(f"Error in C++ read: {e}")
+        if not self.can_read():
+            print("C++ reader not available")
             return None
-    
-    def _write_file_mock(self, data: Dict[str, Any], output_path: str, 
-                         access_mode: str) -> bool:
-        """Mock implementation for testing."""
+        
         try:
-            # Create a simple JSON file as a mock UMDF file
-            mock_umdf = {
-                "format": "UMDF",
-                "version": "1.0.0",
-                "modules": data.get("modules", []),
-                "metadata": data.get("metadata", {}),
-                "access_mode": access_mode,
-                "created_at": datetime.now().isoformat()
+            print(f"Reading UMDF file: {file_path}")
+            
+            # Use the new convenience function that returns all modules at once
+            print("Calling read_umdf_file_all_modules...")
+            all_modules = umdf_reader.read_umdf_file_all_modules(file_path)
+            print(f"read_umdf_file_all_modules returned: {type(all_modules)}")
+            
+            if not all_modules or not all_modules.get('success', False):
+                print("Failed to read UMDF file or no success flag")
+                return {
+                    "modules": [],
+                    "file_info": {},
+                    "module_count": 0,
+                    "successful_modules": 0,
+                    "failed_modules": 0,
+                    "file_path": file_path
+                }
+            
+            # Extract modules from the result
+            raw_modules = all_modules.get('modules', [])
+            print(f"Found {len(raw_modules)} modules")
+            
+            if not raw_modules:
+                print("No modules found, returning empty result")
+                return {
+                    "modules": [],
+                    "file_info": {},
+                    "module_count": 0,
+                    "successful_modules": 0,
+                    "failed_modules": 0,
+                    "file_path": file_path
+                }
+            
+            # Process each module
+            modules = []
+            successful_modules = 0
+            failed_modules = 0
+            
+            for raw_module in raw_modules:
+                try:
+                    module_id = raw_module.get('module_id', 'unknown')
+                    print(f"Processing module: {module_id}")
+                    
+                    # Convert the raw module data to our expected format
+                    module = {
+                        "id": module_id,
+                        "name": f"Module_{module_id[:8]}",
+                        "schema_id": raw_module.get('schema_url', 'unknown').split('/')[-1].replace('.json', ''),
+                        "type": "unknown",  # We'll determine this from the data
+                        "schema_url": raw_module.get('schema_url', ''),
+                        "metadata": raw_module.get('metadata', {}),
+                        "data": raw_module.get('data', {}),
+                        "version": "1.0",
+                        "created": "",
+                        "dimensions": [],
+                        "pixel_data": None
+                    }
+                    
+                    # Try to determine module type from schema URL or data
+                    schema_url = raw_module.get('schema_url', '')
+                    if 'image' in schema_url.lower() or 'image' in str(raw_module.get('data', {})):
+                        module['type'] = 'image'
+                    elif 'patient' in schema_url.lower() or 'patient' in str(raw_module.get('data', {})):
+                        module['type'] = 'patient'
+                    else:
+                        module['type'] = 'data'
+                    
+                    # Handle pixel data if present (for image modules)
+                    if module['type'] == 'image' and 'data' in raw_module:
+                        # The data might contain pixel information
+                        # For now, we'll store the raw data and handle conversion later
+                        module['pixel_data'] = raw_module.get('data')
+                        
+                        # Try to extract dimensions from metadata if available
+                        metadata = raw_module.get('metadata', {})
+                        if 'dimensions' in metadata:
+                            module['dimensions'] = metadata['dimensions']
+                    
+                    modules.append(module)
+                    successful_modules += 1
+                    print(f"Successfully processed module {module_id}")
+                    
+                except Exception as e:
+                    print(f"Error processing module {raw_module.get('module_id', 'unknown')}: {e}")
+                    failed_modules += 1
+                    # Add a basic module entry for failed modules
+                    modules.append({
+                        "id": raw_module.get('module_id', 'unknown'),
+                        "name": f"Module_{raw_module.get('module_id', 'unknown')[:8]}",
+                        "schema_id": "unknown",
+                        "type": "unknown",
+                        "schema_url": "",
+                        "metadata": {},
+                        "data": {},
+                        "version": "1.0",
+                        "created": "",
+                        "dimensions": [],
+                        "pixel_data": None,
+                        "error": str(e)
+                    })
+            
+            print(f"Successfully processed {successful_modules} modules, {failed_modules} failed")
+            
+            return {
+                "modules": modules,
+                "file_info": {},
+                "module_count": len(modules),
+                "successful_modules": successful_modules,
+                "failed_modules": failed_modules,
+                "file_path": file_path
             }
             
-            # Convert datetime objects to strings for JSON serialization
-            def convert_datetime(obj):
-                if isinstance(obj, datetime):
-                    return obj.isoformat()
-                elif isinstance(obj, dict):
-                    return {k: convert_datetime(v) for k, v in obj.items()}
-                elif isinstance(obj, list):
-                    return [convert_datetime(item) for item in obj]
-                else:
-                    return obj
-            
-            mock_umdf = convert_datetime(mock_umdf)
-            
-            with open(output_path, 'w') as f:
-                json.dump(mock_umdf, f, indent=2)
-            
-            print(f"Mock UMDF file written to: {output_path}")
-            return True
-            
         except Exception as e:
-            print(f"Error writing mock UMDF file: {e}")
-            return False
-    
-    def _read_file_mock(self, file_path: str) -> Optional[Dict[str, Any]]:
-        """Mock implementation for testing."""
-        try:
-            with open(file_path, 'r') as f:
-                data = json.load(f)
-            
-            print(f"Mock UMDF file read from: {file_path}")
-            return data
-            
-        except Exception as e:
-            print(f"Error reading mock UMDF file: {e}")
+            print(f"Error reading UMDF file: {e}")
+            print(f"Exception type: {type(e)}")
+            import traceback
+            traceback.print_exc()
             return None
     
-    def get_supported_schemas(self) -> List[str]:
-        """Get list of supported schema IDs."""
-        if self._lib:
-            try:
-                # Get schemas from C++ implementation
-                schemas_json = self._lib.get_supported_schemas()
-                if schemas_json:
-                    schemas_str = ctypes.string_at(schemas_json).decode('utf-8')
-                    return json.loads(schemas_str)
-            except Exception as e:
-                print(f"Error getting C++ schemas: {e}")
+    def write_file(self, file_path: str, data: Dict[str, Any]) -> bool:
+        """
+        Write data to a UMDF file using the C++ writer.
         
-        # Fallback to default schemas
-        return ["patient", "imaging", "lab_results", "medication"]
-    
-    def validate_schema(self, schema_id: str, data: Dict[str, Any]) -> bool:
-        """Validate data against a schema."""
-        if self._lib:
-            try:
-                # Use C++ schema validation
-                schema_id_bytes = schema_id.encode('utf-8')
-                data_json = json.dumps(data).encode('utf-8')
-                return bool(self._lib.validate_schema(schema_id_bytes, data_json))
-            except Exception as e:
-                print(f"Error in C++ schema validation: {e}")
+        Args:
+            file_path: Path to output file
+            data: Data to write
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self._lib:
+            return False
         
-        # Fallback to basic validation
-        return True
+        try:
+            # Convert data to JSON string
+            json_data = json.dumps(data)
+            json_bytes = json_data.encode('utf-8')
+            
+            # Call C++ write function
+            result = self._lib.write_umdf_file(
+                file_path.encode('utf-8'),
+                json_bytes,
+                len(json_bytes)
+            )
+            
+            return bool(result)
+        except Exception as e:
+            print(f"Error writing UMDF file: {e}")
+            return False
 
-# Global instance
+# Create a global instance
 umdf_interface = UMDFInterface() 

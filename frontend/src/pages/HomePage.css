@@ -1,0 +1,111 @@
+.home-page {
+  min-height: 100vh;
+  width: 100%;
+  background: #f8f9fa;
+  display: flex;
+  flex-direction: column;
+}
+
+.header-section {
+  background: white;
+  border-bottom: 1px solid #dee2e6;
+  width: 100%;
+  padding: 1rem 0;
+}
+
+.header-logo {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: bold;
+  font-size: 2.5rem;
+  text-align: center;
+  margin: 0;
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  width: 100%;
+  padding: 2rem;
+  background-color: #f8f9fa;
+  padding-top: 4rem;
+}
+
+.card {
+  border: none;
+  border-radius: 20px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  min-width: 450px;
+  max-width: 550px;
+  padding: 2rem;
+}
+
+.card-body {
+  padding: 2rem !important;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 12px;
+  padding: 1rem 2.5rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+}
+
+.btn-primary:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 15px 30px rgba(102, 126, 234, 0.4);
+}
+
+.alert-info {
+  background-color: rgba(209, 236, 241, 0.9);
+  border-color: #bee5eb;
+  color: #0c5460;
+  border-radius: 12px;
+}
+
+.badge {
+  font-size: 0.9em;
+  padding: 0.6em 1em;
+  border-radius: 20px;
+  font-weight: 500;
+}
+
+.badge.bg-primary {
+  background-color: #667eea !important;
+}
+
+.badge.bg-info {
+  background-color: #17a2b8 !important;
+}
+
+.badge.bg-success {
+  background-color: #28a745 !important;
+}
+
+.badge.bg-warning {
+  background-color: #ffc107 !important;
+  color: #212529 !important;
+}
+
+/* Center the title properly */
+.header-section .container-fluid {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Ensure proper spacing in the card */
+.py-5 {
+  padding-top: 2rem !important;
+  padding-bottom: 2rem !important;
+} 
