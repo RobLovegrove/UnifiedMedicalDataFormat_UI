@@ -1,0 +1,46 @@
+{
+  "id": "patient",
+  "name": "Patient Information",
+  "description": "Basic patient demographic information",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "dateOfBirth": {
+        "type": "string",
+        "format": "date"
+      },
+      "gender": {
+        "type": "string",
+        "enum": [
+          "male",
+          "female",
+          "other"
+        ]
+      },
+      "contact": {
+        "type": "object",
+        "properties": {
+          "phone": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        }
+      }
+    },
+    "required": [
+      "id",
+      "name"
+    ]
+  },
+  "version": "1.0.0",
+  "created_at": "2025-08-06 18:47:43.261396"
+}

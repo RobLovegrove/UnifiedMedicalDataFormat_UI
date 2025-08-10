@@ -1,0 +1,490 @@
+{% extends "base.html" %}
+
+{% block title %}Import Files - Medical File Format UI{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h1 class="mb-3">
+            <i class="fas fa-upload me-2"></i>
+            Import Files
+        </h1>
+        <p class="text-muted">Import FHIR, DICOM, and image files into your medical file format</p>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-file-upload me-2"></i>
+                    Upload Files
+                </h5>
+            </div>
+            <div class="card-body">
+                <form id="import-form" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="file" class="form-label">Select File</label>
+                        <input type="file" class="form-control" id="file" name="file" required>
+                        <div class="form-text">Supported formats: FHIR JSON, DICOM, UMDF, JPEG, PNG</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="file-type" class="form-label">File Type</label>
+                        <select class="form-select" id="file-type" name="file_type" required>
+                            <option value="">Select file type...</option>
+                            <option value="fhir">FHIR JSON</option>
+                            <option value="dicom">DICOM</option>
+                            <option value="dicom_folder">DICOM Folder (3D Volume)</option>
+                            <option value="umdf">UMDF File</option>
+                            <option value="image">Image (JPEG/PNG)</option>
+                        </select>
+                    </div>
+                    
+                    <!-- DICOM Folder Path Input (hidden by default) -->
+                    <div class="mb-3" id="folder-path-container" style="display: none;">
+                        <label for="folder-path" class="form-label">DICOM Folder Path</label>
+                        <input type="text" class="form-control" id="folder-path" name="folder_path" placeholder="/path/to/dicom/folder">
+                        <div class="form-text">Enter the full path to the folder containing DICOM files</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="schema-id" class="form-label">Target Schema (Optional)</label>
+                        <select class="form-select" id="schema-id" name="schema_id">
+                            <option value="">Auto-detect from file</option>
+                            <option value="patient">Patient Information</option>
+                            <option value="imaging">Imaging Data</option>
+                            <option value="lab_results">Laboratory Results</option>
+                            <option value="medication">Medication Information</option>
+                        </select>
+                        <div class="form-text">Leave empty to auto-detect based on file content</div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary" id="import-btn">
+                        <i class="fas fa-upload me-2"></i>
+                        Import File
+                    </button>
+                </form>
+                
+                <!-- Progress Bar -->
+                <div class="mt-3" id="progress-container" style="display: none;">
+                    <div class="progress">
+                        <div class="progress-bar" role="progressbar" style="width: 0%" id="progress-bar"></div>
+                    </div>
+                    <small class="text-muted" id="progress-text">Processing...</small>
+                </div>
+                
+                <!-- Results -->
+                <div class="mt-3" id="import-results"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-info-circle me-2"></i>
+                    Import Information
+                </h5>
+            </div>
+            <div class="card-body">
+                <h6>Supported Formats:</h6>
+                <ul class="list-unstyled">
+                    <li class="mb-2">
+                        <i class="fas fa-file-code text-primary me-2"></i>
+                        <strong>FHIR JSON:</strong> Patient data, observations, medications
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-x-ray text-success me-2"></i>
+                        <strong>DICOM:</strong> Medical imaging files
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-database text-warning me-2"></i>
+                        <strong>UMDF:</strong> Unified Medical Data Format files
+                    </li>
+                    <li class="mb-2">
+                        <i class="fas fa-image text-info me-2"></i>
+                        <strong>Images:</strong> JPEG, PNG medical images
+                    </li>
+                </ul>
+                
+                <hr>
+                
+                <h6>Schema Mapping:</h6>
+                <ul class="list-unstyled">
+                    <li class="mb-1">
+                        <span class="badge bg-primary me-2">Patient</span>
+                        FHIR Patient resources
+                    </li>
+                    <li class="mb-1">
+                        <span class="badge bg-success me-2">Imaging</span>
+                        DICOM files, medical images
+                    </li>
+                    <li class="mb-1">
+                        <span class="badge bg-info me-2">Lab Results</span>
+                        FHIR Observation resources
+                    </li>
+                    <li class="mb-1">
+                        <span class="badge bg-warning me-2">Medication</span>
+                        FHIR MedicationRequest resources
+                    </li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="card mt-3">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-history me-2"></i>
+                    Recent Imports
+                </h5>
+            </div>
+            <div class="card-body">
+                <div id="recent-imports-list">
+                    <p class="text-muted text-center">No recent imports</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('import-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData();
+    const fileInput = document.getElementById('file');
+    const fileTypeSelect = document.getElementById('file-type');
+    const schemaSelect = document.getElementById('schema-id');
+    const folderPathInput = document.getElementById('folder-path');
+    
+    if (!fileInput.files[0] && fileTypeSelect.value !== 'dicom_folder') {
+        alert('Please select a file');
+        return;
+    }
+    
+    if (fileTypeSelect.value === 'dicom_folder') {
+        // Handle DICOM folder upload
+        if (!folderPathInput.value.trim()) {
+            alert('Please enter a folder path');
+            return;
+        }
+        
+        formData.append('folder_path', folderPathInput.value.trim());
+        formData.append('file_type', fileTypeSelect.value);
+        if (schemaSelect.value) {
+            formData.append('schema_id', schemaSelect.value);
+        }
+        
+        // Show progress
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const progressText = document.getElementById('progress-text');
+        const importBtn = document.getElementById('import-btn');
+        
+        progressContainer.style.display = 'block';
+        importBtn.disabled = true;
+        progressBar.style.width = '50%';
+        progressText.textContent = 'Processing DICOM folder...';
+        
+        try {
+            const response = await axios.post('/import/dicom-folder', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
+            });
+            
+            progressBar.style.width = '100%';
+            progressText.textContent = 'Import completed!';
+            
+            // Show results
+            const resultsDiv = document.getElementById('import-results');
+            if (response.data.success) {
+                const volumeInfo = response.data.data.volume_info;
+                resultsDiv.innerHTML = `
+                    <div class="alert alert-success">
+                        <i class="fas fa-check-circle me-2"></i>
+                        <strong>Success!</strong> ${response.data.message}
+                        <br>
+                        <small class="text-muted">
+                            Volume: ${volumeInfo.dimensions} | 
+                            Slices: ${volumeInfo.num_slices} | 
+                            Modality: ${volumeInfo.modality}
+                        </small>
+                    </div>
+                `;
+            } else {
+                resultsDiv.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-circle me-2"></i>
+                        <strong>Error:</strong> ${response.data.message}
+                    </div>
+                `;
+            }
+            
+            // Reset form
+            document.getElementById('import-form').reset();
+            document.getElementById('folder-path-container').style.display = 'none';
+            
+        } catch (error) {
+            progressText.textContent = 'Import failed';
+            const resultsDiv = document.getElementById('import-results');
+            resultsDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-circle me-2"></i>
+                    <strong>Error:</strong> ${error.response?.data?.message || error.message}
+                </div>
+            `;
+        } finally {
+            importBtn.disabled = false;
+            setTimeout(() => {
+                progressContainer.style.display = 'none';
+                progressBar.style.width = '0%';
+            }, 2000);
+        }
+        
+    } else {
+        // Handle single file upload (existing code)
+        formData.append('file', fileInput.files[0]);
+        formData.append('file_type', fileTypeSelect.value);
+        if (schemaSelect.value) {
+            formData.append('schema_id', schemaSelect.value);
+        }
+        
+        // Show progress
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const progressText = document.getElementById('progress-text');
+        const importBtn = document.getElementById('import-btn');
+        
+        progressContainer.style.display = 'block';
+        importBtn.disabled = true;
+        progressBar.style.width = '50%';
+        progressText.textContent = 'Uploading file...';
+        
+        try {
+            const response = await axios.post('/import/file', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
+            });
+            
+            progressBar.style.width = '100%';
+            progressText.textContent = 'Import completed!';
+            
+            // Show results
+            const resultsDiv = document.getElementById('import-results');
+            if (response.data.success) {
+                const data = response.data.data;
+                let html = '';
+                
+                // Handle different response structures
+                if (data.modules && Array.isArray(data.modules)) {
+                    // UMDF or multi-module response
+                    html = `
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle me-2"></i>
+                            <strong>Success!</strong> ${response.data.message}
+                            <br>
+                            <small class="text-muted">
+                                File Type: ${data.file_type || 'unknown'} | 
+                                Modules: ${data.modules.length}
+                            </small>
+                        </div>
+                    `;
+                    
+                    // Show module details
+                    data.modules.forEach((module, index) => {
+                        html += `
+                            <div class="card mt-3">
+                                <div class="card-header">
+                                    <h6 class="mb-0">
+                                        <i class="fas fa-cube me-2"></i>
+                                        Module ${index + 1}: ${module.name || 'Unknown'}
+                                    </h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <strong>Schema ID:</strong> ${module.schema_id || 'Unknown'}<br>
+                                            <strong>ID:</strong> ${module.id || 'Unknown'}<br>
+                                            <strong>Created:</strong> ${module.created_at || 'Unknown'}<br>
+                                            <strong>Source:</strong> ${module.metadata?.source || 'Unknown'}
+                                        </div>
+                                        <div class="col-md-6">
+                                            <strong>Updated:</strong> ${module.updated_at || 'Unknown'}
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Module Data -->
+                                    <div class="mt-3">
+                                        <h6><i class="fas fa-database me-2"></i>Module Data:</h6>
+                                        
+                                        <!-- Check if this is image data -->
+                                        ${module.data.imageData ? 
+                                            `<div class="row">
+                                                <div class="col-md-8">
+                                                    <div style="max-height: 400px; overflow: auto; background: #f8f9fa; padding: 15px; border-radius: 5px;">
+                                                        <h6><i class="fas fa-image me-2"></i>Image Information:</h6>
+                                                        <p><strong>Dimensions:</strong> ${module.data.dimensions || 'Unknown'}</p>
+                                                        <p><strong>Format:</strong> ${module.data.format || 'Unknown'}</p>
+                                                        <p><strong>Pixel Count:</strong> ${module.data.pixelData ? module.data.pixelData.length : 'Unknown'} pixels</p>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <h6><i class="fas fa-image me-2"></i>Image Preview:</h6>
+                                                    <img src="data:image/png;base64,${module.data.imageData}" class="img-fluid border" style="max-width: 100%; height: auto;" alt="Module Image">
+                                                </div>
+                                            </div>` : 
+                                            `<div style="max-height: 400px; overflow: auto; background: #f8f9fa; padding: 15px; border-radius: 5px;">
+                                                <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${JSON.stringify(module.data, null, 2)}</pre>
+                                            </div>`
+                                        }
+                                    </div>
+                                    
+                                    <!-- Module Metadata -->
+                                    <div class="mt-3">
+                                        <h6><i class="fas fa-info-circle me-2"></i>Module Metadata:</h6>
+                                        <div style="max-height: 300px; overflow: auto; background: #f8f9fa; padding: 15px; border-radius: 5px;">
+                                            <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${JSON.stringify(module.metadata, null, 2)}</pre>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                } else if (data.module) {
+                    // Single module response (existing code)
+                    const module = data.module;
+                    const schema = data.schema_id;
+                    html = `
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle me-2"></i>
+                            <strong>Success!</strong> ${response.data.message}
+                            <br>
+                            <small class="text-muted">
+                                Schema: ${schema} | 
+                                Type: ${module.schema_id}
+                            </small>
+                        </div>
+                    `;
+                    
+                    // If DICOM, show metadata
+                    if (schema === 'imaging' && module.metadata && module.metadata.source === 'dicom') {
+                        html += `<div class="card mt-3">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span><i class="fas fa-info-circle me-2"></i>DICOM Metadata</span>
+                                <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#dicom-metadata-table" aria-expanded="false" aria-controls="dicom-metadata-table">Show/Hide</button>
+                            </div>
+                            <div class="collapse show" id="dicom-metadata-table">
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-8">
+                                            <h6>Main Fields</h6>
+                                            <table class="table table-sm table-bordered mb-3">
+                                                <tbody>
+                                                    ${Object.entries(module.data).map(([k, v]) =>
+                                                        (k !== 'metadata' && k !== 'imageData') ? `<tr><th>${k}</th><td>${v}</td></tr>` : ''
+                                                    ).join('')}
+                                                </tbody>
+                                            </table>
+                                            <h6>
+                                                All DICOM Tags
+                                                <button class="btn btn-link btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#all-dicom-tags" aria-expanded="false" aria-controls="all-dicom-tags">Expand/Collapse</button>
+                                            </h6>
+                                            <div class="collapse" id="all-dicom-tags">
+                                                <div style="max-height:300px;overflow:auto;">
+                                                    <table class="table table-sm table-striped">
+                                                        <thead><tr><th>Tag</th><th>Value</th></tr></thead>
+                                                        <tbody>
+                                                            ${module.metadata.dicom_tags ? Object.entries(module.metadata.dicom_tags).map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('') : '<tr><td colspan="2">No tags found</td></tr>'}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <h6>DICOM Image</h6>
+                                            ${module.data.imageData ? 
+                                                `<img src="data:image/png;base64,${module.data.imageData}" class="img-fluid border" style="max-width: 100%; height: auto;" alt="DICOM Image">` : 
+                                                '<p class="text-muted">No image data available</p>'
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>`;
+                    }
+                }
+                
+                resultsDiv.innerHTML = html;
+            } else {
+                resultsDiv.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-circle me-2"></i>
+                        <strong>Error:</strong> ${response.data.message}
+                    </div>
+                `;
+            }
+            
+            // Reset form
+            document.getElementById('import-form').reset();
+            document.getElementById('folder-path-container').style.display = 'none';
+            
+        } catch (error) {
+            progressText.textContent = 'Import failed';
+            const resultsDiv = document.getElementById('import-results');
+            resultsDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-circle me-2"></i>
+                    <strong>Error:</strong> ${error.response?.data?.message || error.message}
+                </div>
+            `;
+        } finally {
+            importBtn.disabled = false;
+            setTimeout(() => {
+                progressContainer.style.display = 'none';
+                progressBar.style.width = '0%';
+            }, 2000);
+        }
+    }
+});
+
+// Show/hide folder path input based on file type
+document.getElementById('file-type').addEventListener('change', function(e) {
+    const folderPathContainer = document.getElementById('folder-path-container');
+    const fileInput = document.getElementById('file');
+    
+    if (e.target.value === 'dicom_folder') {
+        folderPathContainer.style.display = 'block';
+        fileInput.required = false;
+    } else {
+        folderPathContainer.style.display = 'none';
+        fileInput.required = true;
+    }
+});
+
+// Auto-detect file type based on file extension
+document.getElementById('file').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const fileName = file.name.toLowerCase();
+    const fileTypeSelect = document.getElementById('file-type');
+    
+    if (fileName.endsWith('.json')) {
+        fileTypeSelect.value = 'fhir';
+    } else if (fileName.endsWith('.dcm')) {
+        fileTypeSelect.value = 'dicom';
+    } else if (fileName.endsWith('.umdf')) {
+        fileTypeSelect.value = 'umdf';
+    } else if (fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || fileName.endsWith('.png')) {
+        fileTypeSelect.value = 'image';
+    }
+});
+</script>
+{% endblock %} 

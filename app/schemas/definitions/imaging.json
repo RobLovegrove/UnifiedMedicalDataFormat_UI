@@ -1,0 +1,47 @@
+{
+  "id": "imaging",
+  "name": "Imaging Data",
+  "description": "Medical imaging data and metadata",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "modality": {
+        "type": "string",
+        "enum": [
+          "CT",
+          "MRI",
+          "X-Ray",
+          "Ultrasound"
+        ]
+      },
+      "bodyPart": {
+        "type": "string"
+      },
+      "imageData": {
+        "type": "string",
+        "description": "Base64 encoded image"
+      },
+      "metadata": {
+        "type": "object",
+        "properties": {
+          "acquisitionDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "institution": {
+            "type": "string"
+          },
+          "technician": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "required": [
+      "modality",
+      "bodyPart"
+    ]
+  },
+  "version": "1.0.0",
+  "created_at": "2025-08-06 18:47:43.261529"
+}

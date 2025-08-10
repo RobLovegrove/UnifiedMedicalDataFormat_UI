@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Medical File Format UI{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h1 class="mb-3 text-center">
+            <i class="fas fa-file-medical me-2"></i>
+            Medical File Format UI
+        </h1>
+        <p class="text-muted text-center">Import and view medical data files</p>
+    </div>
+</div>
+
+<!-- Import Section -->
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+        <div class="card">
+            <div class="card-header text-center">
+                <h4 class="mb-0">
+                    <i class="fas fa-upload me-2"></i>
+                    Import Files
+                </h4>
+            </div>
+            <div class="card-body text-center p-5">
+                <div class="mb-5">
+                    <i class="fas fa-file-medical fa-4x text-primary mb-4"></i>
+                    <h5>Upload Medical Files</h5>
+                    <p class="text-muted">Import UMDF, DICOM, FHIR, and image files to view and analyze their data</p>
+                </div>
+                
+                <a href="/import" class="btn btn-primary btn-lg px-5 py-3">
+                    <i class="fas fa-upload me-2"></i>
+                    Import Files
+                </a>
+                
+                <div class="mt-5">
+                    <h6 class="text-muted">Supported Formats</h6>
+                    <div class="row justify-content-center">
+                        <div class="col-auto">
+                            <span class="badge bg-primary me-2">UMDF</span>
+                            <span class="badge bg-info me-2">DICOM</span>
+                            <span class="badge bg-success me-2">FHIR</span>
+                            <span class="badge bg-warning me-2">Images</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

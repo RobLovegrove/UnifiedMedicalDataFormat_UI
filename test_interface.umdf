@@ -1,0 +1,26 @@
+{
+  "format": "UMDF",
+  "version": "1.0.0",
+  "modules": [
+    {
+      "id": "test-module-1",
+      "name": "Test Patient",
+      "schema_id": "patient",
+      "data": {
+        "patient_id": "123",
+        "name": "John Doe",
+        "gender": "male"
+      },
+      "metadata": {
+        "source": "test",
+        "created_at": "2024-01-01"
+      }
+    }
+  ],
+  "metadata": {
+    "created_by": "test",
+    "version": "1.0.0"
+  },
+  "access_mode": "overwrite",
+  "created_at": "2025-08-05T19:29:47.603702"
+}
