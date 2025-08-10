@@ -53,7 +53,7 @@ This will compile your C++ code as a shared library for Python integration.
 ### 3. Start the Web UI
 
 ```bash
-python3 run.py
+C
 ```
 
 Or directly with uvicorn:

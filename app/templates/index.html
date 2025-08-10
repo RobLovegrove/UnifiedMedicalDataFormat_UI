@@ -3,39 +3,29 @@
 {% block title %}Medical File Format UI{% endblock %}
 
 {% block content %}
-<div class="row mb-4">
-    <div class="col-12">
-        <h1 class="mb-3 text-center">
-            <i class="fas fa-file-medical me-2"></i>
-            Medical File Format UI
-        </h1>
-        <p class="text-muted text-center">Import and view medical data files</p>
-    </div>
-</div>
-
 <!-- Import Section -->
-<div class="row justify-content-center">
-    <div class="col-md-8 col-lg-6">
-        <div class="card">
-            <div class="card-header text-center">
-                <h4 class="mb-0">
-                    <i class="fas fa-upload me-2"></i>
-                    Import Files
-                </h4>
-            </div>
-            <div class="card-body text-center p-5">
-                <div class="mb-5">
-                    <i class="fas fa-file-medical fa-4x text-primary mb-4"></i>
-                    <h5>Upload Medical Files</h5>
-                    <p class="text-muted">Import UMDF, DICOM, FHIR, and image files to view and analyze their data</p>
+<div class="d-flex align-items-center justify-content-center" style="min-height: 70vh;">
+    <div class="card" style="min-width: 500px;">
+        <div class="card-body text-center p-5">
+            <div class="py-5">
+                <!-- File Display Section -->
+                <div id="fileDisplay" style="display: none;" class="mb-4">
+                    <div class="alert alert-info">
+                        <h6 class="mb-2"><i class="fas fa-file me-2"></i>Selected File</h6>
+                        <p class="mb-1"><strong>Name:</strong> <span id="fileName"></span></p>
+                        <p class="mb-1"><strong>Size:</strong> <span id="fileSize"></span></p>
+                        <p class="mb-0"><strong>Type:</strong> <span id="fileType"></span></p>
+                    </div>
                 </div>
                 
-                <a href="/import" class="btn btn-primary btn-lg px-5 py-3">
-                    <i class="fas fa-upload me-2"></i>
-                    Import Files
-                </a>
+                <div class="d-flex justify-content-center mb-4">
+                    <button class="btn btn-primary btn-lg px-5 py-3" onclick="document.getElementById('fileInput').click()">
+                        <i class="fas fa-upload me-2"></i>Import File
+                    </button>
+                    <input type="file" id="fileInput" style="display: none;" accept=".umdf,.dcm,.json,.jpg,.jpeg,.png">
+                </div>
                 
-                <div class="mt-5">
+                <div class="mt-3">
                     <h6 class="text-muted">Supported Formats</h6>
                     <div class="row justify-content-center">
                         <div class="col-auto">
@@ -50,4 +40,76 @@
         </div>
     </div>
 </div>
+
+<script>
+console.log('Script loaded, setting up file input listener...');
+
+document.getElementById('fileInput').addEventListener('change', function(event) {
+    console.log('File input change event triggered');
+    const file = event.target.files[0];
+    console.log('Selected file:', file);
+    
+    if (file) {
+        console.log('File name:', file.name);
+        console.log('File extension check:', file.name.toLowerCase().endsWith('.umdf'));
+        
+        // Check if it's a UMDF file and redirect immediately
+        if (file.name.toLowerCase().endsWith('.umdf')) {
+            console.log('UMDF file detected, redirecting...');
+            
+            // Store file content in sessionStorage
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const fileContent = e.target.result;
+                const fileId = 'umdf_' + Date.now();
+                
+                // Store file content and metadata in sessionStorage
+                sessionStorage.setItem(fileId, JSON.stringify({
+                    name: file.name,
+                    size: file.size,
+                    content: fileContent,
+                    type: 'umdf'
+                }));
+                
+                // Redirect to UMDF viewer with file ID
+                const fileSize = formatFileSize(file.size);
+                const viewerUrl = `/umdf-viewer?file_id=${fileId}&name=${encodeURIComponent(file.name)}&size=${encodeURIComponent(fileSize)}`;
+                console.log('Redirecting to:', viewerUrl);
+                window.location.href = viewerUrl;
+            };
+            
+            // Read file as base64
+            reader.readAsDataURL(file);
+            return;
+        }
+        
+        console.log('Non-UMDF file, showing file info...');
+        // For non-UMDF files, display file information
+        document.getElementById('fileName').textContent = file.name;
+        document.getElementById('fileSize').textContent = formatFileSize(file.size);
+        
+        // Check if it's a UMDF file and display appropriate type
+        let displayType = file.type || 'Unknown';
+        if (file.name.toLowerCase().endsWith('.umdf')) {
+            displayType = 'Unified Medical Data Format';
+        }
+        document.getElementById('fileType').textContent = displayType;
+        
+        // Show the file display section
+        document.getElementById('fileDisplay').style.display = 'block';
+        
+        console.log('File info displayed for:', file.name);
+    }
+});
+
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+console.log('File input listener setup complete');
+</script>
 {% endblock %} 

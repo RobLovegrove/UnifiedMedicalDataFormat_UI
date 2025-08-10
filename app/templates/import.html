@@ -153,12 +153,121 @@
 
 {% block scripts %}
 <script>
+// Flag to prevent multiple redirects
+let redirectInProgress = false;
+
+// Check if we're loading with URL parameters that might cause issues
+document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const fileParam = urlParams.get('file');
+    const fileTypeParam = urlParams.get('file_type');
+    
+    console.log('Page loaded with URL params:', { file: fileParam, file_type: fileTypeParam });
+    
+    // If we have UMDF file parameters in the URL, clear them to prevent issues
+    if (fileParam && fileTypeParam === 'umdf') {
+        console.log('Clearing problematic URL parameters');
+        // Remove the problematic parameters from the URL
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, newUrl);
+        
+        // Also clear any file input that might have been set
+        const fileInput = document.getElementById('file');
+        if (fileInput) {
+            fileInput.value = '';
+        }
+        
+        // Reset file type selection
+        const fileTypeSelect = document.getElementById('file-type');
+        if (fileTypeSelect) {
+            fileTypeSelect.value = '';
+        }
+    }
+});
+
+// Auto-detect file type (but don't redirect automatically)
+document.getElementById('file').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    console.log('File selected:', file.name, 'Type:', file.type);
+    
+    const fileName = file.name.toLowerCase();
+    const fileTypeSelect = document.getElementById('file-type');
+    
+    if (fileName.endsWith('.json')) {
+        fileTypeSelect.value = 'fhir';
+    } else if (fileName.endsWith('.dcm')) {
+        fileTypeSelect.value = 'dicom';
+    } else if (fileName.endsWith('.umdf')) {
+        fileTypeSelect.value = 'umdf';
+        // Don't redirect automatically - wait for button click
+        console.log('UMDF file detected, ready for import');
+    } else if (fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || fileName.endsWith('.png')) {
+        fileTypeSelect.value = 'image';
+    }
+});
+
+// Function to redirect UMDF files directly to the viewer
+function redirectToUMDFViewer(file) {
+    if (redirectInProgress) {
+        console.log('Redirect already in progress, skipping...');
+        return;
+    }
+    
+    redirectInProgress = true;
+    console.log('Redirecting to UMDF viewer with file:', file.name);
+    
+    // Store the file in sessionStorage temporarily
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            // Convert ArrayBuffer to base64 string for JSON serialization
+            const arrayBuffer = e.target.result;
+            const uint8Array = new Uint8Array(arrayBuffer);
+            const base64String = btoa(String.fromCharCode.apply(null, uint8Array));
+            
+            const fileData = {
+                name: file.name,
+                content: base64String
+            };
+            sessionStorage.setItem('umdfFileData', JSON.stringify(fileData));
+            
+            // Clear the file input to prevent re-triggering
+            document.getElementById('file').value = '';
+            
+            // Redirect to viewer
+            console.log('Redirecting to /umdf-viewer...');
+            window.location.href = '/umdf-viewer';
+        } catch (error) {
+            console.error('Error during redirect:', error);
+            redirectInProgress = false;
+        }
+    };
+    
+    reader.onerror = function() {
+        console.error('Error reading file');
+        redirectInProgress = false;
+    };
+    
+    reader.readAsArrayBuffer(file);
+}
+
+// Handle form submission for all file types
 document.getElementById('import-form').addEventListener('submit', async function(e) {
     e.preventDefault();
     
-    const formData = new FormData();
     const fileInput = document.getElementById('file');
     const fileTypeSelect = document.getElementById('file-type');
+    
+    // Check if this is a UMDF file and redirect if so
+    if (fileTypeSelect.value === 'umdf' && fileInput.files[0]) {
+        console.log('UMDF file detected in form submission, redirecting...');
+        redirectToUMDFViewer(fileInput.files[0]);
+        return; // Don't continue with normal form submission
+    }
+    
+    const formData = new FormData();
     const schemaSelect = document.getElementById('schema-id');
     const folderPathInput = document.getElementById('folder-path');
     
@@ -248,7 +357,7 @@ document.getElementById('import-form').addEventListener('submit', async function
         }
         
     } else {
-        // Handle single file upload (existing code)
+        // Handle single file upload (non-UMDF files)
         formData.append('file', fileInput.files[0]);
         formData.append('file_type', fileTypeSelect.value);
         if (schemaSelect.value) {
@@ -282,9 +391,9 @@ document.getElementById('import-form').addEventListener('submit', async function
                 const data = response.data.data;
                 let html = '';
                 
-                // Handle different response structures
-                if (data.modules && Array.isArray(data.modules)) {
-                    // UMDF or multi-module response
+                // Handle different response types
+                if (data.modules && data.modules.length > 0) {
+                    // Multi-module response
                     html = `
                         <div class="alert alert-success">
                             <i class="fas fa-check-circle me-2"></i>
@@ -323,27 +432,9 @@ document.getElementById('import-form').addEventListener('submit', async function
                                     <!-- Module Data -->
                                     <div class="mt-3">
                                         <h6><i class="fas fa-database me-2"></i>Module Data:</h6>
-                                        
-                                        <!-- Check if this is image data -->
-                                        ${module.data.imageData ? 
-                                            `<div class="row">
-                                                <div class="col-md-8">
-                                                    <div style="max-height: 400px; overflow: auto; background: #f8f9fa; padding: 15px; border-radius: 5px;">
-                                                        <h6><i class="fas fa-image me-2"></i>Image Information:</h6>
-                                                        <p><strong>Dimensions:</strong> ${module.data.dimensions || 'Unknown'}</p>
-                                                        <p><strong>Format:</strong> ${module.data.format || 'Unknown'}</p>
-                                                        <p><strong>Pixel Count:</strong> ${module.data.pixelData ? module.data.pixelData.length : 'Unknown'} pixels</p>
-                                                    </div>
-                                                </div>
-                                                <div class="col-md-4">
-                                                    <h6><i class="fas fa-image me-2"></i>Image Preview:</h6>
-                                                    <img src="data:image/png;base64,${module.data.imageData}" class="img-fluid border" style="max-width: 100%; height: auto;" alt="Module Image">
-                                                </div>
-                                            </div>` : 
-                                            `<div style="max-height: 400px; overflow: auto; background: #f8f9fa; padding: 15px; border-radius: 5px;">
-                                                <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${JSON.stringify(module.data, null, 2)}</pre>
-                                            </div>`
-                                        }
+                                        <div style="max-height: 400px; overflow: auto; background: #f8f9fa; padding: 15px; border-radius: 5px;">
+                                            <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${JSON.stringify(module.data, null, 2)}</pre>
+                                        </div>
                                     </div>
                                     
                                     <!-- Module Metadata -->
@@ -357,8 +448,9 @@ document.getElementById('import-form').addEventListener('submit', async function
                             </div>
                         `;
                     });
+                    
                 } else if (data.module) {
-                    // Single module response (existing code)
+                    // Single module response
                     const module = data.module;
                     const schema = data.schema_id;
                     html = `
@@ -465,25 +557,6 @@ document.getElementById('file-type').addEventListener('change', function(e) {
     } else {
         folderPathContainer.style.display = 'none';
         fileInput.required = true;
-    }
-});
-
-// Auto-detect file type based on file extension
-document.getElementById('file').addEventListener('change', function(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    
-    const fileName = file.name.toLowerCase();
-    const fileTypeSelect = document.getElementById('file-type');
-    
-    if (fileName.endsWith('.json')) {
-        fileTypeSelect.value = 'fhir';
-    } else if (fileName.endsWith('.dcm')) {
-        fileTypeSelect.value = 'dicom';
-    } else if (fileName.endsWith('.umdf')) {
-        fileTypeSelect.value = 'umdf';
-    } else if (fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') || fileName.endsWith('.png')) {
-        fileTypeSelect.value = 'image';
     }
 });
 </script>

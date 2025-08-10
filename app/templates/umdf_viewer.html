@@ -1,0 +1,378 @@
+{% extends "base.html" %}
+
+{% block title %}UMDF Viewer{% endblock %}
+
+{% block content %}
+<!-- Import Dialog Overlay -->
+<div id="importDialog" class="position-fixed w-100 h-100 d-flex align-items-center justify-content-center" style="background-color: rgba(0, 0, 0, 0.5); z-index: 1050; top: 0; left: 0;">
+    <div class="card" style="min-width: 400px;">
+        <div class="card-body text-center p-5">
+            <div class="spinner-border text-primary mb-3" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <h5 class="mb-3">Importing UMDF File</h5>
+            
+            <!-- File Details -->
+            <div class="alert alert-info mb-3">
+                <h6 class="mb-2"><i class="fas fa-file me-2"></i>File Details</h6>
+                <p class="mb-1"><strong>Name:</strong> <span id="fileName"></span></p>
+                <p class="mb-1"><strong>Size:</strong> <span id="fileSize"></span></p>
+                <p class="mb-0"><strong>Type:</strong> Unified Medical Data Format</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Main Content -->
+<div class="container-fluid py-4">
+    <!-- File Info Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body position-relative">
+                    <div class="position-absolute" style="top: 20px; right: 20px;">
+                        <button class="btn btn-link text-muted p-0 me-3" onclick="importNewFile()" title="Import New File" style="border: none; background: none;">
+                            <i class="fas fa-file-import" style="font-size: 1.5rem; transition: color 0.2s ease;" onmouseover="this.style.color='#28a745'" onmouseout="this.style.color='#6c757d'"></i>
+                        </button>
+                        <button class="btn btn-link text-muted p-0" onclick="clearFileCache()" title="Clear Cache & Import New File" style="border: none; background: none;">
+                            <i class="fas fa-trash" style="font-size: 1.5rem; transition: color 0.2s ease;" onmouseover="this.style.color='#dc3545'" onmouseout="this.style.color='#6c757d'"></i>
+                        </button>
+                    </div>
+                    <h4 class="card-title">
+                        UMDF File Viewer
+                    </h4>
+                    {% if file_info.file_path %}
+                        <p class="mb-2"><strong>File:</strong> {{ file_info.file_path }}</p>
+                        <p class="mb-2"><strong>Size:</strong> {{ file_info.file_size }}</p>
+                        <p class="mb-0"><strong>Modules Found:</strong> {{ file_info.module_count }}</p>
+                    {% else %}
+                        <p class="text-muted">No file loaded</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+</div>
+
+<script>
+// Get file details from URL parameters and display them
+document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const fileId = urlParams.get('file_id');
+    const fileName = urlParams.get('name') || 'Unknown file';
+    const fileSize = urlParams.get('size') || 'Unknown size';
+    
+    // Check if we have cached file data
+    const cachedData = localStorage.getItem('umdf_file_data');
+    if (cachedData) {
+        try {
+            const data = JSON.parse(cachedData);
+            updatePageWithFileData(data, false); // Pass false to indicate not a new import
+            // Hide the import dialog since we're using cached data
+            document.getElementById('importDialog').style.display = 'none';
+            return; // Exit early, don't process fileId
+        } catch (e) {
+            console.error('Error parsing cached data:', e);
+            localStorage.removeItem('umdf_file_data');
+        }
+    }
+    
+    // Display file name and size in the dialog
+    document.getElementById('fileName').textContent = fileName;
+    document.getElementById('fileSize').textContent = fileSize;
+    
+    console.log('UMDF Viewer loaded - file ID:', fileId, 'Name:', fileName, 'Size:', fileSize);
+    
+    // If we have a file ID, retrieve the file content and send it to the server
+    if (fileId) {
+        const fileData = sessionStorage.getItem(fileId);
+        if (fileData) {
+            try {
+                const parsedData = JSON.parse(fileData);
+                console.log('Retrieved file data:', parsedData);
+                
+                // Send file content to server for processing
+                sendFileToServer(parsedData, fileId);
+                
+            } catch (e) {
+                console.error('Error parsing file data:', e);
+                showError('Failed to parse file data');
+                // Hide the import dialog on error
+                document.getElementById('importDialog').style.display = 'none';
+            }
+        } else {
+            console.error('No file data found for ID:', fileId);
+            showError('File data not found. Please try importing again.');
+            // Hide the import dialog on error
+            document.getElementById('importDialog').style.display = 'none';
+        }
+    } else {
+        // No file ID, hide the dialog immediately
+        document.getElementById('importDialog').style.display = 'none';
+    }
+    
+    // Remove the timeout - popup will close when file processing is complete
+});
+
+function sendFileToServer(fileData, fileId) {
+    // Convert base64 data URL to binary
+    const base64Data = fileData.content.split(',')[1];
+    const binaryData = atob(base64Data);
+    
+    // Convert to Uint8Array
+    const bytes = new Uint8Array(binaryData.length);
+    for (let i = 0; i < binaryData.length; i++) {
+        bytes[i] = binaryData.charCodeAt(i);
+    }
+    
+    // Create FormData and send to server
+    const formData = new FormData();
+    formData.append('file', new Blob([bytes], { type: 'application/octet-stream' }), fileData.name);
+    
+    fetch('/umdf-viewer', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('Server response:', data);
+        if (data.error) {
+            showError(data.error);
+        } else {
+            // Update the page with the file data
+            updatePageWithFileData(data, true); // Pass true to indicate a new import
+        }
+        // Clean up sessionStorage
+        sessionStorage.removeItem('file_id');
+    })
+    .catch(error => {
+        console.error('Error processing file:', error);
+        // Only show error if this is an actual import attempt, not a page refresh
+        if (sessionStorage.getItem('file_id')) {
+            showError('Error processing file. Please try again.');
+        }
+        // Hide the import dialog
+        const importDialog = document.getElementById('importDialog');
+        if (importDialog) {
+            importDialog.style.display = 'none';
+        }
+    });
+}
+
+function updatePageWithFileData(data, isNewImport) {
+    console.log('Updating page with file data:', data);
+    
+    // Save the processed file data to localStorage for persistence
+    try {
+        localStorage.setItem('umdf_file_data', JSON.stringify(data));
+        console.log('File data saved to localStorage');
+    } catch (e) {
+        console.error('Failed to save file data to localStorage:', e);
+    }
+    
+    // Hide the import dialog
+    const importDialog = document.getElementById('importDialog');
+    if (importDialog) {
+        importDialog.style.display = 'none';
+        importDialog.style.visibility = 'hidden';
+        importDialog.style.opacity = '0';
+        importDialog.style.zIndex = '-1';
+        
+    } else {
+        console.error('Import dialog element not found!');
+        
+        // Try alternative selectors
+        const alternativeSelectors = [
+            '.position-fixed',
+            '[style*="z-index: 1050"]',
+            '[style*="background-color: rgba(0, 0, 0, 0.5)"]'
+        ];
+        
+        alternativeSelectors.forEach(selector => {
+            const elements = document.querySelectorAll(selector);
+            console.log(`Found ${elements.length} elements with selector: ${selector}`);
+            elements.forEach(el => {
+                if (el.style.position === 'fixed' || el.style.zIndex === '1050') {
+                    console.log('Hiding element with alternative method:', el);
+                    el.style.display = 'none';
+                    el.style.visibility = 'hidden';
+                    el.style.opacity = '0';
+                    el.style.zIndex = '-1';
+                }
+            });
+        });
+    }
+    
+    // Update the file info header
+    const fileInfoHeader = document.querySelector('.card-title').parentElement;
+    if (data.file_path) {
+        // Update the card content
+        fileInfoHeader.innerHTML = `
+            <div class="position-absolute" style="top: 20px; right: 20px;">
+                <button class="btn btn-link text-muted p-0 me-3" onclick="importNewFile()" title="Import New File" style="border: none; background: none;">
+                    <i class="fas fa-file-import" style="font-size: 1.5rem; transition: color 0.2s ease;" onmouseover="this.style.color='#28a745'" onmouseout="this.style.color='#6c757d'"></i>
+                </button>
+                <button class="btn btn-link text-muted p-0" onclick="clearFileCache()" title="Clear Cache & Import New File" style="border: none; background: none;">
+                    <i class="fas fa-trash" style="font-size: 1.5rem; transition: color 0.2s ease;" onmouseover="this.style.color='#dc3545'" onmouseout="this.style.color='#6c757d'"></i>
+                </button>
+            </div>
+            <h4 class="card-title">
+                UMDF File Viewer
+            </h4>
+            <p class="mb-2"><strong>File:</strong> ${data.file_path}</p>
+            <p class="mb-2"><strong>Size:</strong> ${data.file_size || 'Unknown'}</p>
+            <p class="mb-0"><strong>Modules Found:</strong> ${data.module_count || 0}</p>
+        `;
+    }
+    
+    // Display modules if they exist
+    if (data.modules && data.modules.length > 0) {
+        const modulesContainer = document.createElement('div');
+        modulesContainer.className = 'row';
+        
+        data.modules.forEach(module => {
+            const moduleCard = document.createElement('div');
+            moduleCard.className = 'col-12 mb-4';
+            moduleCard.innerHTML = `
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title mb-3">${(module.type || 'Unknown').charAt(0).toUpperCase() + (module.type || 'Unknown').slice(1)} Module:</h5>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6>Module Information</h6>
+                                <ul class="list-unstyled">
+                                    <li><strong>Module ID:</strong> ${module.id || 'Unknown'}</li>
+                                    <li><strong>Schema URL:</strong> ${module.schema_url || 'Unknown'}</li>
+                                    <li><strong>Created:</strong> ${formatDate(module.created_at) || 'Unknown'}</li>
+                                </ul>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>Metadata</h6>
+                                <pre class="bg-light p-2 rounded" style="max-height: 200px; overflow-y: auto;">${JSON.stringify(module.metadata || {}, null, 2)}</pre>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-3">
+                            <h6>Module Data</h6>
+                            <pre class="bg-light p-2 rounded" style="max-height: 300px; overflow-y: auto;">${JSON.stringify(module.data || {}, null, 2)}</pre>
+                        </div>
+                    </div>
+                </div>
+            `;
+            modulesContainer.appendChild(moduleCard);
+        });
+        
+        // Insert modules right after the file info header card, maintaining the same column structure
+        const fileInfoRow = document.querySelector('.row.mb-4');
+        if (fileInfoRow) {
+            fileInfoRow.parentElement.appendChild(modulesContainer);
+        } else {
+            // Fallback to main container
+            const container = document.querySelector('.container-fluid');
+            container.appendChild(modulesContainer);
+        }
+        
+        if (isNewImport) {
+            showSuccess(`File processed successfully! Found ${data.module_count} modules.`);
+        }
+    } else {
+        if (isNewImport) {
+            showSuccess('File processed successfully, but no modules were found.');
+        }
+    }
+}
+
+function formatDate(dateString) {
+    if (!dateString) return 'Unknown';
+    
+    try {
+        const date = new Date(dateString);
+        if (isNaN(date.getTime())) return 'Invalid Date';
+        
+        return date.toLocaleDateString('en-GB', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    } catch (e) {
+        return 'Invalid Date';
+    }
+}
+
+function showSuccess(message) {
+    const successDiv = document.createElement('div');
+    successDiv.className = 'alert alert-success';
+    successDiv.innerHTML = `<i class="fas fa-check-circle me-2"></i>${message}`;
+    
+    successDiv.style.position = 'fixed';
+    successDiv.style.bottom = '20px';
+    successDiv.style.left = '50%';
+    successDiv.style.transform = 'translateX(-50%)';
+    successDiv.style.zIndex = '9999';
+    successDiv.style.minWidth = '300px';
+    successDiv.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+    successDiv.style.borderRadius = '8px';
+    successDiv.style.transition = 'opacity 0.5s ease-out'; // Added for fade-out
+    
+    document.body.appendChild(successDiv);
+    
+    // Start fade out after 1.5 seconds
+    setTimeout(() => {
+        successDiv.style.opacity = '0';
+        
+        // Remove from DOM after fade completes
+        setTimeout(() => {
+            if (successDiv.parentNode) {
+                successDiv.parentNode.removeChild(successDiv);
+            }
+        }, 500); // 0.5s for fade transition
+    }, 1500); // 1.5s visible time
+}
+
+function showError(message) {
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'alert alert-danger';
+    errorDiv.innerHTML = `<i class="fas fa-exclamation-circle me-2"></i>${message}`;
+    
+    errorDiv.style.position = 'fixed';
+    errorDiv.style.bottom = '20px';
+    errorDiv.style.left = '50%';
+    errorDiv.style.transform = 'translateX(-50%)';
+    errorDiv.style.zIndex = '9999';
+    errorDiv.style.minWidth = '300px';
+    errorDiv.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+    errorDiv.style.borderRadius = '8px';
+    errorDiv.style.transition = 'opacity 0.5s ease-out';
+    
+    document.body.appendChild(errorDiv);
+    
+    // Start fade out after 2 seconds
+    setTimeout(() => {
+        errorDiv.style.opacity = '0';
+        
+        // Remove from DOM after fade completes
+        setTimeout(() => {
+            if (errorDiv.parentNode) {
+                errorDiv.parentNode.removeChild(errorDiv);
+            }
+        }, 500); // 0.5s for fade transition
+    }, 2000); // 2s visible time
+}
+
+function clearFileCache() {
+    localStorage.removeItem('umdf_file_data');
+    sessionStorage.removeItem('file_id'); // Clear session storage for the current file
+    window.location.reload(); // Reload the page to show "No file loaded"
+    showSuccess('File cache cleared. Please import a new file.');
+}
+
+function importNewFile() {
+    // Redirect back to the home page to import a new file
+    window.location.href = '/';
+}
+</script>
+{% endblock %} 

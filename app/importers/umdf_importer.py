@@ -92,6 +92,64 @@ class UMDFImporter:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
     
+    def import_file_from_path(self, file_path: str) -> Dict[str, Any]:
+        """Import a UMDF file from a file path and convert to internal module format."""
+        if not self.can_import():
+            raise ImportError("UMDF reader module not available")
+        
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"UMDF file not found: {file_path}")
+        
+        try:
+            # Read the file with the reader
+            if not self.reader.readFile(file_path):
+                raise RuntimeError(f"Failed to read UMDF file: {file_path}")
+            
+            # Get file info
+            file_info = umdf_reader.read_umdf_file(file_path)
+            
+            # Get module IDs from the reader
+            module_ids = self.reader.getModuleIds()
+            
+            # Convert to internal module format
+            modules = []
+            
+            for module_id in module_ids:
+                try:
+                    # Use the convenience function to get module data
+                    module_data = umdf_reader.get_module_data(file_path, module_id)
+                    
+                    # Convert to internal module format
+                    module = {
+                        "id": module_id,
+                        "name": f"UMDF_Module_{module_id}",
+                        "schema_id": self._determine_module_type_from_dict(module_data),
+                        "type": self._determine_module_type_from_dict(module_data),
+                        "schema_url": module_data.get('schema_url', 'unknown'),
+                        "metadata": self._extract_metadata_from_dict(module_data),
+                        "data": self._extract_data_from_dict(module_data),
+                        "created_at": datetime.now().isoformat(),
+                        "source_file": file_path
+                    }
+                    
+                    modules.append(module)
+                    
+                except Exception as e:
+                    print(f"Warning: Failed to process module {module_id}: {e}")
+                    continue
+            
+            return {
+                "file_type": "umdf",
+                "file_path": file_path,
+                "modules": modules,
+                "file_info": file_info,
+                "module_count": len(modules)
+            }
+            
+        except Exception as e:
+            print(f"Error importing UMDF file from path {file_path}: {e}")
+            raise
+    
 
     
     def _determine_module_type_from_dict(self, module_data: Dict[str, Any]) -> str:

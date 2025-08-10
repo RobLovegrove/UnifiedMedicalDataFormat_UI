@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, UploadFile, File, Form
+from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -9,6 +9,7 @@ from typing import List, Optional
 
 from .models.medical_file import MedicalFile, Module
 from .importers.file_importer import FileImporter
+from .importers.umdf_importer import UMDFImporter
 from .schemas.schema_manager import SchemaManager
 from cpp_interface.umdf_interface import umdf_interface
 
@@ -18,11 +19,12 @@ app = FastAPI(title="Medical File Format UI", version="1.0.0")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Templates
-templates = Jinja2Templates(directory="app/templates")
+templates = Jinja2Templates(directory="/Users/rob/Documents/CS/Dissertation/UMDF_UI/app/templates")
 
 # Initialize managers
 schema_manager = SchemaManager()
 file_importer = FileImporter()
+umdf_importer = UMDFImporter()
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -40,6 +42,57 @@ async def view_file(request: Request, file_id: str):
         "modules": []
     })
 
+@app.get("/umdf-viewer")
+async def umdf_viewer(request: Request):
+    """UMDF viewer page."""
+    # Get file path from query parameters
+    file_path = request.query_params.get('file', '')
+    file_name = request.query_params.get('name', '')
+    file_size = request.query_params.get('size', '')
+    
+    file_info = {
+        "file_path": file_path,
+        "file_name": file_name,
+        "file_size": file_size,
+        "file_type": "UMDF",
+        "module_count": 0,
+        "modules": []
+    }
+    
+    # If we have a file path, try to read it with the C++ module
+    if file_path:
+        try:
+            # Import the UMDF file using the C++ module
+            result = umdf_importer.import_file_from_path(file_path)
+            if result and 'modules' in result:
+                file_info['modules'] = result['modules']
+                file_info['module_count'] = len(result['modules'])
+                file_info['file_data'] = result
+        except Exception as e:
+            file_info['error'] = str(e)
+            print(f"Error reading UMDF file: {e}")
+    
+    return templates.TemplateResponse("umdf_viewer.html", {
+        "request": request,
+        "file_info": file_info
+    })
+
+@app.post("/umdf-viewer")
+async def umdf_viewer_upload(request: Request, file: UploadFile = File(...)):
+    """Handle UMDF file upload directly in the viewer."""
+    try:
+        # Read file content
+        file_content = await file.read()
+        
+        # Import the UMDF file
+        result = umdf_importer.import_file(file_content, file.filename)
+        
+        # Return the result as JSON
+        return result
+        
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.get("/import")
 async def import_page(request: Request):
     """Import page for adding new files."""
@@ -56,15 +109,18 @@ async def import_file(
         # Read file content
         content = await file.read()
         
-        # Import based on file type
-        result = await file_importer.import_file(
-            content=content,
-            filename=file.filename,
-            file_type=file_type,
-            schema_id=schema_id
-        )
-        
-        return {"success": True, "message": f"File imported successfully", "data": result}
+        # Handle other file types (UMDF files are redirected immediately)
+        try:
+            result = await file_importer.import_file(
+                content=content,
+                filename=file.filename,
+                file_type=file_type,
+                schema_id=schema_id
+            )
+            
+            return {"success": True, "message": f"File imported successfully", "data": result}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
     
     except Exception as e:
         return {"success": False, "message": str(e)}
