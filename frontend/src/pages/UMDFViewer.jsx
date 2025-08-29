@@ -13,6 +13,7 @@ const UMDFViewer = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMessage, setProcessingMessage] = useState('');
   const [sliderValues, setSliderValues] = useState({}); // Track slider values for each module
+  const [currentImageModuleId, setCurrentImageModuleId] = useState(null); // Track which image module is currently displayed
 
   // Set up global function for slider updates
   useEffect(() => {
@@ -48,6 +49,17 @@ const UMDFViewer = () => {
       });
     }
   }, [encounters]);
+
+  // Initialize current image module when modules are loaded
+  useEffect(() => {
+    if (modules.length > 0 && !currentImageModuleId) {
+      // Find the first image module and set it as current
+      const firstImageModule = modules.find(m => m.type === 'image');
+      if (firstImageModule) {
+        setCurrentImageModuleId(firstImageModule.id);
+      }
+    }
+  }, [modules, currentImageModuleId]);
   
   // Process file and load modules on component mount
   useEffect(() => {
@@ -284,54 +296,63 @@ const UMDFViewer = () => {
   };
 
   // Render imaging module with image viewer and sliders
-  const renderImagingModule = (module) => {
+  const renderImagingModule = (module, moduleNode = null) => {
+    // Use the current image module if set, otherwise use the passed module
+    const currentModule = currentImageModuleId ? modules.find(m => m.id === currentImageModuleId) : module;
+    if (!currentModule) {
+      console.log('No current module found, currentImageModuleId:', currentImageModuleId);
+      return null;
+    }
+    
+    console.log('Rendering image module:', currentModule.id, 'Type:', currentModule.type, 'Has data:', !!currentModule.data);
+    
     // Access dimensions from the new metadata structure
     let dimensions = [];
     let dimensionNames = [];
     
     // Check if metadata is a single object with image_structure (new format)
-    if (module.metadata && typeof module.metadata === 'object' && !Array.isArray(module.metadata)) {
+    if (currentModule.metadata && typeof currentModule.metadata === 'object' && !Array.isArray(currentModule.metadata)) {
       // Check if metadata has a content array (wrapped format from backend)
-      if (module.metadata.content && Array.isArray(module.metadata.content) && module.metadata.content.length > 0) {
-        const contentItem = module.metadata.content[0];
-        if (contentItem.image_structure && contentItem.image_structure.dimensions) {
-          dimensions = contentItem.image_structure.dimensions;
-          dimensionNames = contentItem.image_structure.dimension_names || [];
-          console.log('Found dimensions in metadata.content[0].image_structure:', dimensions);
-          console.log('Found dimension names in metadata.content[0].image_structure:', dimensionNames);
-        } else if (contentItem.dimensions) {
-          // Fallback: check if dimensions are directly in content item
-          dimensions = contentItem.dimensions;
-          dimensionNames = contentItem.dimension_names || [];
-          console.log('Found dimensions directly in metadata.content[0]:', dimensions);
-          console.log('Found dimension names directly in metadata.content[0]:', dimensionNames);
+              if (currentModule.metadata.content && Array.isArray(currentModule.metadata.content) && currentModule.metadata.content.length > 0) {
+          const contentItem = currentModule.metadata.content[0];
+          if (contentItem.image_structure && contentItem.image_structure.dimensions) {
+            dimensions = contentItem.image_structure.dimensions;
+            dimensionNames = contentItem.image_structure.dimension_names || [];
+            console.log('Found dimensions in metadata.content[0].image_structure:', dimensions);
+            console.log('Found dimension names in metadata.content[0].image_structure:', dimensionNames);
+          } else if (contentItem.dimensions) {
+            // Fallback: check if dimensions are directly in content item
+            dimensions = contentItem.dimensions;
+            dimensionNames = contentItem.dimension_names || [];
+            console.log('Found dimensions directly in metadata.content[0]:', dimensions);
+            console.log('Found dimension names directly in metadata.content[0]:', dimensionNames);
+          }
+        } else if (currentModule.metadata.image_structure && currentModule.metadata.image_structure.dimensions) {
+          // Direct image_structure in metadata
+          dimensions = currentModule.metadata.image_structure.dimensions;
+          dimensionNames = currentModule.metadata.image_structure.dimension_names || [];
+          console.log('Found dimensions in metadata.image_structure:', dimensions);
+          console.log('Found dimension names in metadata.image_structure:', dimensions);
+        } else if (currentModule.metadata.dimensions) {
+          // Fallback: check if dimensions are directly in metadata
+          dimensions = currentModule.metadata.dimensions;
+          dimensionNames = currentModule.metadata.dimension_names || [];
+          console.log('Found dimensions directly in metadata:', dimensions);
+          console.log('Found dimension names directly in metadata:', dimensionNames);
         }
-      } else if (module.metadata.image_structure && module.metadata.image_structure.dimensions) {
-        // Direct image_structure in metadata
-        dimensions = module.metadata.image_structure.dimensions;
-        dimensionNames = module.metadata.image_structure.dimension_names || [];
-        console.log('Found dimensions in metadata.image_structure:', dimensions);
-        console.log('Found dimension names in metadata.image_structure:', dimensionNames);
-      } else if (module.metadata.dimensions) {
-        // Fallback: check if dimensions are directly in metadata
-        dimensions = module.metadata.dimensions;
-        dimensionNames = module.metadata.dimension_names || [];
-        console.log('Found dimensions directly in metadata:', dimensions);
-        console.log('Found dimension names directly in metadata:', dimensionNames);
-      }
     }
     // Legacy: check if metadata is an array (old format)
-    else if (Array.isArray(module.metadata) && module.metadata.length > 0) {
-      const metadataObj = module.metadata[0];
+    else if (Array.isArray(currentModule.metadata) && currentModule.metadata.length > 0) {
+      const metadataObj = currentModule.metadata[0];
       dimensions = metadataObj.dimensions || [];
       dimensionNames = metadataObj.dimension_names || [];
       console.log('Found dimensions in metadata[0] (legacy):', dimensions);
-      console.log('Found dimension names in metadata[0] (legacy):', dimensionNames);
+      console.log('Found dimension names in metadata[0] (legacy):', dimensions);
     }
     // Fallback: check if dimensions are directly in module
-    else if (module.dimensions && Array.isArray(module.dimensions)) {
-      dimensions = module.dimensions;
-      dimensionNames = module.dimension_names || [];
+    else if (currentModule.dimensions && Array.isArray(currentModule.dimensions)) {
+      dimensions = currentModule.dimensions;
+      dimensionNames = currentModule.dimension_names || [];
       console.log('Found dimensions directly in module:', dimensions);
     }
     
@@ -348,19 +369,19 @@ const UMDFViewer = () => {
     const numFrames = numDimensions > 2 ? dimensions.slice(2).reduce((acc, dim) => acc * dim, 1) : 1;
     
     console.log('=== IMAGE MODULE DEBUG ===');
-    console.log('Metadata structure:', module.metadata);
-    console.log('Metadata type:', typeof module.metadata);
-    console.log('Metadata keys:', Object.keys(module.metadata || {}));
-    console.log('Has image_structure:', module.metadata?.image_structure ? 'Yes' : 'No');
-    if (module.metadata?.image_structure) {
-      console.log('Image structure keys:', Object.keys(module.metadata.image_structure));
-      console.log('Image structure dimensions:', module.metadata.image_structure.dimensions);
-      console.log('Image structure dimension_names:', module.metadata.image_structure.dimension_names);
+    console.log('Metadata structure:', currentModule.metadata);
+    console.log('Metadata type:', typeof currentModule.metadata);
+    console.log('Metadata keys:', Object.keys(currentModule.metadata || {}));
+    console.log('Has image_structure:', currentModule.metadata?.image_structure ? 'Yes' : 'No');
+    if (currentModule.metadata?.image_structure) {
+      console.log('Image structure keys:', Object.keys(currentModule.metadata.image_structure));
+      console.log('Image structure dimensions:', currentModule.metadata.image_structure.dimensions);
+      console.log('Image structure dimension_names:', currentModule.metadata.image_structure.dimension_names);
     }
-    console.log('Has direct dimensions:', module.metadata?.dimensions ? 'Yes' : 'No');
-    if (module.metadata?.dimensions) {
-      console.log('Direct dimensions:', module.metadata.dimensions);
-      console.log('Direct dimension_names:', module.metadata.dimension_names);
+    console.log('Has direct dimensions:', currentModule.metadata?.dimensions ? 'Yes' : 'No');
+    if (currentModule.metadata?.dimensions) {
+      console.log('Direct dimensions:', currentModule.metadata.dimensions);
+      console.log('Direct dimension_names:', currentModule.metadata.dimension_names);
     }
     console.log('Extracted dimensions array:', dimensions);
     console.log('Extracted dimension names:', dimensionNames);
@@ -373,55 +394,156 @@ const UMDFViewer = () => {
     console.log('==========================');
     
     // Debug: Check for image data in various possible locations
-    console.log('module.imageData:', module.imageData);
-    console.log('module.data:', module.data);
-    console.log('module.pixelData:', module.pixelData);
-    if (module.data) {
-      console.log('module.data keys:', Object.keys(module.data));
-      if (module.data.imageData) {
-        console.log('module.data.imageData:', module.data.imageData);
+    console.log('currentModule.imageData:', currentModule.imageData);
+    console.log('currentModule.data:', currentModule.data);
+    console.log('currentModule.pixelData:', currentModule.pixelData);
+    if (currentModule.data) {
+      console.log('currentModule.data keys:', Object.keys(currentModule.data));
+      if (currentModule.data.imageData) {
+        console.log('currentModule.data.imageData:', currentModule.data.imageData);
       }
-      if (module.data.pixelData) {
-        console.log('module.data.pixelData:', module.data.pixelData);
+      if (currentModule.data.pixelData) {
+        console.log('currentModule.data.pixelData:', currentModule.data.pixelData);
       }
     }
     
     return (
       <div className="imaging-module">
+        <div className="bg-white p-3 rounded mt-3">
         <div className="row">
-          <div className="col-md-8">
-            <div className="image-viewer-container">
+          {/* Derived Image Module Buttons */}
+          {moduleNode && moduleNode.derives && moduleNode.derives.length > 0 && (() => {
+            const derivedImageModules = moduleNode.derives
+              .map(derived => modules.find(m => m.id === derived.id))
+              .filter(derivedModule => derivedModule && derivedModule.type === 'image');
+            
+            if (derivedImageModules.length === 0) return null;
+            
+            return (
+              <div className="col-md-3">
+                <div className="derived-modules-sidebar" style={{
+                  backgroundColor: 'white',
+                  padding: '15px',
+                  paddingBottom: '25px',
+                  borderRadius: '8px',
+                  height: '100%',
+                  minHeight: '400px',
+                  width: '100%'
+                }}>
+                  <h6 className="mb-3" style={{color: '#667eea'}}>
+                    <i className="fas fa-images me-2"></i>
+                    Image Series
+                  </h6>
+                  <div className="d-grid gap-2">
+                    {/* Original/First Image Module Button */}
+                    <button
+                      className="btn btn-sm w-100"
+                      onClick={async () => {
+                        try {
+                          // Switch back to the original image module
+                          setCurrentImageModuleId(module.id);
+                          console.log('Switched to original image module:', module.id);
+                        } catch (error) {
+                          console.error('Error switching to original module:', error);
+                        }
+                      }}
+                      title={`Switch to ${module.name || module.type} Module`}
+                      style={{
+                        fontSize: '0.8rem',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        width: '100%',
+                        height: '38px',
+                        backgroundColor: module.id === (currentImageModuleId || module.id) ? '#667eea' : 'transparent',
+                        color: module.id === (currentImageModuleId || module.id) ? 'white' : '#667eea',
+                        border: '1px solid #667eea'
+                      }}
+                    >
+                      <i className="fas fa-image me-1"></i>
+                      {module.name || module.type} (Original)
+                    </button>
+                    
+                    {/* Derived Image Module Buttons */}
+                    {derivedImageModules.map((derivedModule, idx) => (
+                      <button
+                        key={idx}
+                        className="btn btn-sm w-100"
+                        onClick={async () => {
+                          try {
+                            // Load the derived module's data first if it hasn't been loaded
+                            if (!derivedModule.data || Object.keys(derivedModule.data).length === 0) {
+                              console.log('Loading data for derived module:', derivedModule.id);
+                              await loadModule(derivedModule.id);
+                            }
+                            
+                            // Switch to the derived image module
+                            setCurrentImageModuleId(derivedModule.id);
+                            console.log('Switched to derived image module:', derivedModule.id);
+                          } catch (error) {
+                            console.error('Error switching to derived module:', error);
+                          }
+                        }}
+                        title={`Switch to ${derivedModule.name || derivedModule.type} Module`}
+                        style={{
+                          fontSize: '0.8rem',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          width: '100%',
+                          height: '38px',
+                          backgroundColor: derivedModule.id === (currentImageModuleId || module.id) ? '#667eea' : 'transparent',
+                          color: derivedModule.id === (currentImageModuleId || module.id) ? 'white' : '#667eea',
+                          border: '1px solid #667eea'
+                        }}
+                      >
+                        <i className="fas fa-image me-1"></i>
+                        {derivedModule.name || derivedModule.type}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+          
+          <div className="col-md-6">
+            <div className="image-viewer-container" style={{width: '100%'}}>
               {(() => {
                 // Function to render the first frame
                 // Check multiple possible locations for image data
-                let imageData = module.imageData;
+                let imageData = currentModule.imageData;
                 let pixelData = null;
                 
-                if (!imageData && module.data) {
-                  // Check if module.data has frame_data (new backend structure)
-                  if (module.data.frame_data && Array.isArray(module.data.frame_data) && module.data.frame_data.length > 0) {
-                    // New structure: module.data.frame_data contains array of frames
-                    imageData = module.data.frame_data;
-                    console.log('Found frame_data in module.data, length:', imageData.length);
-                  } else if (Array.isArray(module.data) && module.data.length > 0) {
-                    // Legacy structure: module.data is directly an array of frames
-                    imageData = module.data;
-                    console.log('Found frame array in module.data, length:', imageData.length);
-                  } else if (module.data.imageData) {
-                    imageData = module.data.imageData;
-                  } else if (module.data.pixelData) {
+                if (!imageData && currentModule.data) {
+                  // Check if currentModule.data has frame_data (new backend structure)
+                  if (currentModule.data.frame_data && Array.isArray(currentModule.data.frame_data) && currentModule.data.frame_data.length > 0) {
+                    // New structure: currentModule.data.frame_data contains array of frames
+                    imageData = currentModule.data.frame_data;
+                    console.log('Found frame_data in currentModule.data, length:', imageData.length);
+                  } else if (Array.isArray(currentModule.data) && currentModule.data.length > 0) {
+                    // Legacy structure: currentModule.data is directly an array of frames
+                    imageData = currentModule.data;
+                    console.log('Found frame array in currentModule.data, length:', imageData.length);
+                  } else if (currentModule.data.imageData) {
+                    imageData = currentModule.data.imageData;
+                  } else if (currentModule.data.pixelData) {
                     // If pixelData is directly in data, create a single frame structure
-                    imageData = [{ pixelData: module.data.pixelData }];
+                    imageData = [{ pixelData: currentModule.data.pixelData }];
                   }
                 }
                 
                 if (!imageData || !Array.isArray(imageData) || imageData.length === 0) {
+                  console.log('No image data available for module:', currentModule.id);
+                  console.log('imageData:', imageData);
+                  console.log('currentModule.data:', currentModule.data);
+                  console.log('currentModule.data.frame_data:', currentModule.data?.frame_data);
                   return (
                     <div className="text-center p-4">
                       <i className="fas fa-exclamation-triangle fa-3x text-warning mb-3"></i>
                       <p className="text-muted">No image data available</p>
                       <small className="text-muted">
-                        Checked: module.imageData, module.data (array of {module.data?.length || 0} frames)
+                        Checked: currentModule.imageData, currentModule.data (array of {currentModule.data?.length || 0} frames)
                       </small>
                     </div>
                   );
@@ -434,7 +556,7 @@ const UMDFViewer = () => {
                   // Get current slider values for dimensions beyond width/height from state
                   const currentSliderValues = [];
                   for (let i = 2; i < numDimensions; i++) {
-                    const key = `${module.id || 'unknown'}_${i}`;
+                    const key = `${currentModule.id || 'unknown'}_${i}`;
                     const value = sliderValues[key] || 1; // Default to 1 for 1-indexed
                     currentSliderValues.push(value);
                   }
@@ -471,10 +593,10 @@ const UMDFViewer = () => {
                   const dimNames = [];
                   for (let i = 2; i < numDimensions; i++) {
                     let dimName = `Dimension ${i}`;
-                    if (module.metadata && typeof module.metadata === 'object' && !Array.isArray(module.metadata)) {
+                    if (currentModule.metadata && typeof currentModule.metadata === 'object' && !Array.isArray(currentModule.metadata)) {
                       // Check if metadata has a content array (wrapped format from backend)
-                      if (module.metadata.content && Array.isArray(module.metadata.content) && module.metadata.content.length > 0) {
-                        const contentItem = module.metadata.content[0];
+                      if (currentModule.metadata.content && Array.isArray(currentModule.metadata.content) && currentModule.metadata.content.length > 0) {
+                        const contentItem = currentModule.metadata.content[0];
                         if (contentItem.image_structure && contentItem.image_structure.dimension_names && 
                             Array.isArray(contentItem.image_structure.dimension_names) && 
                             contentItem.image_structure.dimension_names[i]) {
@@ -483,20 +605,20 @@ const UMDFViewer = () => {
                                   contentItem.dimension_names[i]) {
                           dimName = contentItem.dimension_names[i];
                         }
-                      } else if (module.metadata.image_structure && module.metadata.image_structure.dimension_names && 
-                                Array.isArray(module.metadata.image_structure.dimension_names) && 
-                                module.metadata.image_structure.dimension_names[i]) {
+                      } else if (currentModule.metadata.image_structure && currentModule.metadata.image_structure.dimension_names && 
+                                Array.isArray(currentModule.metadata.image_structure.dimension_names) && 
+                                currentModule.metadata.image_structure.dimension_names[i]) {
                         // Direct image_structure in metadata
-                        dimName = module.metadata.image_structure.dimension_names[i];
-                      } else if (module.metadata.dimension_names && Array.isArray(module.metadata.dimension_names) && 
-                                module.metadata.dimension_names[i]) {
+                        dimName = currentModule.metadata.image_structure.dimension_names[i];
+                      } else if (currentModule.metadata.dimension_names && Array.isArray(currentModule.metadata.dimension_names) && 
+                                currentModule.metadata.dimension_names[i]) {
                         // Fallback: check if dimension_names are directly in metadata
-                        dimName = module.metadata.dimension_names[i];
+                        dimName = currentModule.metadata.dimension_names[i];
                       }
-                    } else if (module.metadata && Array.isArray(module.metadata) && module.metadata.length > 0) {
+                    } else if (currentModule.metadata && Array.isArray(currentModule.metadata) && currentModule.metadata.length > 0) {
                       // Legacy format: check metadata array
-                      const metadata = module.metadata[0];
-                      if (metadata.dimension_names && Array.isArray(metadata.dimension_names) && metadata.dimension_names[i]) {
+                      const metadata = currentModule.metadata[0];
+                      if (metadata.dimension_names && metadata.dimension_names[i]) {
                         dimName = metadata.dimension_names[i];
                       }
                     }
@@ -555,12 +677,12 @@ const UMDFViewer = () => {
                 let channelNames = [];
                 
                 // Check module-level metadata for channel info (this has the image_structure)
-                if (module.metadata && typeof module.metadata === 'object' && !Array.isArray(module.metadata)) {
-                  console.log('🔍 Channel detection - module.metadata:', module.metadata);
-                  console.log('🔍 Channel detection - module.metadata.content:', module.metadata.content);
+                if (currentModule.metadata && typeof currentModule.metadata === 'object' && !Array.isArray(currentModule.metadata)) {
+                  console.log('🔍 Channel detection - currentModule.metadata:', currentModule.metadata);
+                  console.log('🔍 Channel detection - currentModule.metadata.content:', currentModule.metadata.content);
                   
-                  if (module.metadata.content && Array.isArray(module.metadata.content) && module.metadata.content.length > 0) {
-                    const moduleMetadata = module.metadata.content[0];
+                  if (currentModule.metadata.content && Array.isArray(currentModule.metadata.content) && currentModule.metadata.content.length > 0) {
+                    const moduleMetadata = currentModule.metadata.content[0];
                     console.log('🔍 Channel detection - moduleMetadata:', moduleMetadata);
                     console.log('🔍 Channel detection - moduleMetadata.image_structure:', moduleMetadata.image_structure);
                     
@@ -578,16 +700,16 @@ const UMDFViewer = () => {
                       console.log('🔍 Channel detection - channelNames updated:', channelNames);
                     }
                   } else {
-                    console.log('🔍 Channel detection - No content array or empty content in module.metadata');
+                    console.log('🔍 Channel detection - No content array or empty content in currentModule.metadata');
                   }
                   
-                  if (module.metadata.image_structure && module.metadata.image_structure.channels) {
-                    console.log('🔍 Channel detection - Found direct image_structure.channels:', module.metadata.image_structure.channels);
-                    numChannels = module.metadata.image_structure.channels;
+                  if (currentModule.metadata.image_structure && currentModule.metadata.image_structure.channels) {
+                    console.log('🔍 Channel detection - Found direct image_structure.channels:', currentModule.metadata.image_structure.channels);
+                    numChannels = currentModule.metadata.image_structure.channels;
                     console.log('Found channels in module metadata (direct):', numChannels);
                   }
                 } else {
-                  console.log('🔍 Channel detection - module.metadata is not an object or is an array:', module.metadata);
+                  console.log('🔍 Channel detection - currentModule.metadata is not an object or is an array:', currentModule.metadata);
                 }
                 
                 // Also check frame metadata as fallback
@@ -741,17 +863,17 @@ const UMDFViewer = () => {
                         </small>
                       </div>
                       {numDimensions > 2 && (
-                        <div className="mt-1">
+                        <div className="mt-1 mb-3">
                           <small className="text-muted">
-                            Current slider positions: {(() => {
-                              const positions = [];
-                              for (let i = 2; i < numDimensions; i++) {
-                                const key = `${module.id || 'unknown'}_${i}`;
-                                const value = sliderValues[key] || 1; // Default to 1 for 1-indexed
-                                positions.push(`${dimensionNames[i] || `Dim ${i}`}: ${value}`);
-                              }
-                              return positions.join(', ');
-                            })()}
+                                                    Current slider positions: {(() => {
+                          const positions = [];
+                          for (let i = 2; i < numDimensions; i++) {
+                            const key = `${currentModule.id || 'unknown'}_${i}`;
+                            const value = sliderValues[key] || 1; // Default to 1 for 1-indexed
+                            positions.push(`${dimensionNames[i] || `Dim ${i}`}: ${value}`);
+                          }
+                          return positions.join(', ');
+                        })()}
                           </small>
                         </div>
                       )}
@@ -772,31 +894,31 @@ const UMDFViewer = () => {
           </div>
           
           {numDimensions > 2 && (
-            <div className="col-md-4">
-              <div className="dimension-controls">
+            <div className="col-md-3">
+              <div className="dimension-controls" style={{width: '100%'}}>
                 {dimensions.slice(2).map((dim, index) => {
                   const dimIndex = index + 2;
                   // Get dimension name from metadata if available
                   let dimName = `Dimension ${dimIndex}`;
-                  if (module.metadata && Array.isArray(module.metadata) && module.metadata.length > 0) {
-                    const metadata = module.metadata[0];
+                  if (currentModule.metadata && Array.isArray(currentModule.metadata) && currentModule.metadata.length > 0) {
+                    const metadata = currentModule.metadata[0];
                     if (metadata.dimension_names && Array.isArray(metadata.dimension_names) && metadata.dimension_names[dimIndex]) {
                       dimName = metadata.dimension_names[dimIndex];
                     }
                   }
                   return (
-                    <div key={dimIndex} className="dimension-control mb-3">
+                    <div key={dimIndex} className="dimension-control mb-3" style={{width: '100%'}}>
                       <label className="form-label text-muted mb-2">
                         {dimName}: <span className="text-primary">1-{dim}</span>
                       </label>
                       <CustomSlider
-                        value={sliderValues[`${module.id || 'unknown'}_${index + 2}`] || 1}
+                        value={sliderValues[`${currentModule.id || 'unknown'}_${index + 2}`] || 1}
                         min={1}
                         max={dim}
-                        onChange={(newValue) => updateSliderValue(module.id || 'unknown', index + 2, newValue)}
-                        moduleId={module.id || 'unknown'}
+                        onChange={(newValue) => updateSliderValue(currentModule.id || 'unknown', index + 2, newValue)}
+                        moduleId={currentModule.id || 'unknown'}
                         dimension={index + 2}
-                        className="me-4"
+                        className="w-100"
                       />
                     </div>
                   );
@@ -805,19 +927,127 @@ const UMDFViewer = () => {
             </div>
           )}
         </div>
+        
+        {/* Frame Metadata Display */}
+        {(() => {
+          console.log('🔍 DEBUG: Checking frame metadata display for module:', currentModule.id);
+          console.log('🔍 DEBUG: currentModule.data:', currentModule.data);
+          console.log('🔍 DEBUG: currentModule.data.frame_data:', currentModule.data?.frame_data);
+          console.log('🔍 DEBUG: Should show frame metadata:', !!(currentModule.data && currentModule.data.frame_data));
+          return currentModule.data && currentModule.data.frame_data;
+        })() && (
+          <div className="mt-3">
+            <h6 className="text-purple-600">
+              <i className="fas fa-layer-group me-2"></i>
+              Frame Metadata
+            </h6>
+            <div className="bg-light p-3 rounded">
+              {(() => {
+                // Get current frame index based on slider values
+                let currentFrameIndex = 0;
+                
+                if (currentModule.metadata && typeof currentModule.metadata === 'object' && !Array.isArray(currentModule.metadata)) {
+                  if (currentModule.metadata.content && Array.isArray(currentModule.metadata.content) && currentModule.metadata.content.length > 0) {
+                    const contentItem = currentModule.metadata.content[0];
+                    if (contentItem.image_structure && contentItem.image_structure.dimensions) {
+                      const dimensions = contentItem.image_structure.dimensions;
+                      const numDimensions = dimensions.length;
+                      
+                      if (numDimensions > 2) {
+                        // Get current slider values for dimensions beyond width/height
+                        const currentSliderValues = [];
+                        for (let i = 2; i < numDimensions; i++) {
+                          const key = `${currentModule.id || 'unknown'}_${i}`;
+                          const value = sliderValues[key] || 1; // Default to 1 for 1-indexed
+                          currentSliderValues.push(value);
+                        }
+                        
+                        // Calculate frame index using the same logic as the image viewer
+                        let frameIndex = 0;
+                        
+                        if (currentSliderValues.length === 1) {
+                          // Single slider - just subtract 1 for 0-indexed
+                          frameIndex = currentSliderValues[0] - 1;
+                        } else {
+                          // Multiple sliders - use dynamic calculation
+                          frameIndex = currentSliderValues[0] - 1; // First slider contribution
+                          
+                          for (let i = 1; i < currentSliderValues.length; i++) {
+                            // Calculate multiplier for this dimension
+                            let multiplier = 1;
+                            for (let j = 0; j < i; j++) {
+                              multiplier *= dimensions[j + 2]; // +2 because we skip width and height
+                            }
+                            
+                            const contribution = (currentSliderValues[i] - 1) * multiplier;
+                            frameIndex += contribution;
+                          }
+                        }
+                        
+                        currentFrameIndex = Math.min(frameIndex, currentModule.data.frame_data.length - 1);
+                      }
+                    }
+                  }
+                }
+                
+                const currentFrame = currentModule.data.frame_data[currentFrameIndex];
+                return currentFrame && currentFrame.metadata ? (
+                  <div>
+                    <div className="mb-2">
+                      <strong>Frame {currentFrameIndex + 1}:</strong>
+                      <span className="text-muted ml-2">
+                        (Slider position: {(() => {
+                          if (currentModule.metadata && typeof currentModule.metadata === 'object' && !Array.isArray(currentModule.metadata)) {
+                            if (currentModule.metadata.content && Array.isArray(currentModule.metadata.content) && currentModule.metadata.content.length > 0) {
+                              const contentItem = currentModule.metadata.content[0];
+                              if (contentItem.image_structure && contentItem.image_structure.dimensions) {
+                                const dimensions = contentItem.image_structure.dimensions;
+                                const numDimensions = dimensions.length;
+                                if (numDimensions > 2) {
+                                  const sliderInfo = [];
+                                  for (let i = 2; i < numDimensions; i++) {
+                                    const key = `${currentModule.id || 'unknown'}_${i}`;
+                                    const value = sliderValues[key] || 1;
+                                    const dimName = contentItem.image_structure.dimension_names && 
+                                                 contentItem.image_structure.dimension_names[i] ? 
+                                                 contentItem.image_structure.dimension_names[i] : 
+                                                 `Dim ${i}`;
+                                    sliderInfo.push(`${dimName}: ${value}`);
+                                  }
+                                  return sliderInfo.join(', ');
+                                }
+                              }
+                            }
+                          }
+                          return 'N/A';
+                        })()})
+                      </span>
+                    </div>
+                    <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
+                      {JSON.stringify(currentFrame.metadata, null, 2)}
+                    </pre>
+                  </div>
+                ) : (
+                  <span className="text-muted">No frame metadata available</span>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+        </div>
       </div>
     );
   };
 
   // Render encounter with its module tree
-  const renderEncounter = (encounter) => {
+  const renderEncounter = (encounter, index) => {
     const { encounter_id, module_tree } = encounter;
     
     return (
         <div className="py-4" style={{width: '100%'}}>
-          <h4 className="card-title mb-4 text-start" style={{color: '#667eea'}}>
+          <h4 className="card-title mb-4 text-start" style={{color: '#667eea', paddingLeft: '20px'}}>
             <i className="fas fa-hospital me-2"></i>
-            Encounter: {encounter_id}
+            Encounter {index + 1}
           </h4>
           
           <div className="module-tree">
@@ -904,166 +1134,66 @@ const UMDFViewer = () => {
                         </div>
                       )}
                       
-                      {/* Debug: Show metadata info */}
-                      <div className="mt-2 text-muted small">
-                        <strong>Debug:</strong> Metadata exists: {module.metadata ? 'Yes' : 'No'}, 
-                        Type: {module.metadata ? typeof module.metadata : 'N/A'}, 
-                        Is Array: {Array.isArray(module.metadata)}, 
-                        Length: {module.metadata ? (Array.isArray(module.metadata) ? module.metadata.length : 'N/A') : 'N/A'}
-                      </div>
-                      
-                                            {/* Module Metadata Display */}
-                      {module.metadata && (
-                        <div className="mt-3">
-                          <h6 className="text-primary">
-                            <i className="fas fa-info-circle me-2"></i>
-                            Module Metadata
-                          </h6>
-                          <div className="bg-light p-3 rounded">
-                            {Array.isArray(module.metadata) ? (
-                              // If metadata is directly an array, display each record
-                              module.metadata.map((meta, index) => (
-                                <div key={index} className="mb-2">
-                                  <strong>Record {index + 1}:</strong>
-                                  <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
-                                    {JSON.stringify(meta, null, 2)}
-                                  </pre>
-                                </div>
-                              ))
-                            ) : module.metadata.content && Array.isArray(module.metadata.content) ? (
-                              // If metadata has a content array, display just the content
-                              module.metadata.content.map((meta, index) => (
-                                <div key={index} className="mb-2">
-                                  <strong>Record {index + 1}:</strong>
-                                  <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
-                                    {JSON.stringify(meta, null, 2)}
-                                  </pre>
-                                </div>
-                              ))
-                            ) : module.metadata && typeof module.metadata === 'object' && !Array.isArray(module.metadata) ? (
-                              // If metadata is a single object (like image metadata), display it directly
-                              <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
-                                {JSON.stringify(module.metadata, null, 2)}
-                              </pre>
-                            ) : (
-                              // Fallback: display the metadata object
-                              <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
-                                {JSON.stringify(module.metadata, null, 2)}
-                              </pre>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Frame Metadata Display */}
-                      {module.type === 'image' && module.data && module.data.frame_data && (
-                        <div className="mt-3">
-                          <h6 className="text-purple-600">
-                            <i className="fas fa-layer-group me-2"></i>
-                            Frame Metadata
-                          </h6>
-                          <div className="bg-light p-3 rounded">
-                            {(() => {
-                              // Get current frame index based on slider values using the same logic as renderImagingModule
-                              let currentFrameIndex = 0;
-                              
-                              if (module.metadata && typeof module.metadata === 'object' && !Array.isArray(module.metadata)) {
-                                if (module.metadata.content && Array.isArray(module.metadata.content) && module.metadata.content.length > 0) {
-                                  const contentItem = module.metadata.content[0];
-                                  if (contentItem.image_structure && contentItem.image_structure.dimensions) {
-                                    const dimensions = contentItem.image_structure.dimensions;
-                                    const numDimensions = dimensions.length;
-                                    
-                                    if (numDimensions > 2) {
-                                      // Get current slider values for dimensions beyond width/height
-                                      const currentSliderValues = [];
-                                      for (let i = 2; i < numDimensions; i++) {
-                                        const key = `${module.id || 'unknown'}_${i}`;
-                                        const value = sliderValues[key] || 1; // Default to 1 for 1-indexed
-                                        currentSliderValues.push(value);
-                                      }
-                                      
-                                      // Calculate frame index using the same logic as renderImagingModule
-                                      let frameIndex = 0;
-                                      
-                                      if (currentSliderValues.length === 1) {
-                                        // Single slider - just subtract 1 for 0-indexed
-                                        frameIndex = currentSliderValues[0] - 1;
-                                      } else {
-                                        // Multiple sliders - use dynamic calculation
-                                        // First slider (index 0) increases by 1
-                                        // Other sliders increase by the product of all previous dimensions
-                                        frameIndex = currentSliderValues[0] - 1; // First slider contribution
-                                        
-                                        for (let i = 1; i < currentSliderValues.length; i++) {
-                                          // Calculate multiplier for this dimension
-                                          // Multiplier = product of all previous extra dimensions
-                                          let multiplier = 1;
-                                          for (let j = 0; j < i; j++) {
-                                            multiplier *= dimensions[j + 2]; // +2 because we skip width and height
-                                          }
-                                          
-                                          const contribution = (currentSliderValues[i] - 1) * multiplier;
-                                          frameIndex += contribution;
-                                        }
-                                      }
-                                      
-                                      currentFrameIndex = Math.min(frameIndex, module.data.frame_data.length - 1);
-                                    }
-                                  }
-                                }
-                              }
-                              
-                              const currentFrame = module.data.frame_data[currentFrameIndex];
-                              return currentFrame && currentFrame.metadata ? (
-                                <div>
-                                  <div className="mb-2">
-                                    <strong>Frame {currentFrameIndex + 1}:</strong>
-                                    <span className="text-muted ml-2">
-                                      (Slider position: {(() => {
-                                        if (module.metadata && typeof module.metadata === 'object' && !Array.isArray(module.metadata)) {
-                                          if (module.metadata.content && Array.isArray(module.metadata.content) && module.metadata.content.length > 0) {
-                                            const contentItem = module.metadata.content[0];
-                                            if (contentItem.image_structure && contentItem.image_structure.dimensions) {
-                                              const dimensions = contentItem.image_structure.dimensions;
-                                              const numDimensions = dimensions.length;
-                                              if (numDimensions > 2) {
-                                                const sliderInfo = [];
-                                                for (let i = 2; i < numDimensions; i++) {
-                                                  const key = `${module.id || 'unknown'}_${i}`;
-                                                  const value = sliderValues[key] || 1;
-                                                  const dimName = contentItem.image_structure.dimension_names && 
-                                                               contentItem.image_structure.dimension_names[i] ? 
-                                                               contentItem.image_structure.dimension_names[i] : 
-                                                               `Dim ${i}`;
-                                                  sliderInfo.push(`${dimName}: ${value}`);
-                                                }
-                                                return sliderInfo.join(', ');
-                                              }
-                                            }
-                                          }
-                                        }
-                                        return 'N/A';
-                                      })()})
-                                    </span>
+                      {/* Module Metadata Display */}
+                      {(() => {
+                        // For image modules, show metadata of the currently selected image module
+                        // For other modules, show the original module metadata
+                        const metadataToShow = module.type === 'image' && currentImageModuleId ? 
+                          modules.find(m => m.id === currentImageModuleId)?.metadata : 
+                          module.metadata;
+                        
+                        if (!metadataToShow) return null;
+                        
+                        return (
+                          <div className="mt-3">
+                            <h6 className="text-primary">
+                              <i className="fas fa-info-circle me-2"></i>
+                              Module Metadata
+                              {module.type === 'image' && currentImageModuleId && currentImageModuleId !== module.id && (
+                                <span className="text-muted ms-2">
+                                  (Showing: {modules.find(m => m.id === currentImageModuleId)?.name || currentImageModuleId})
+                                </span>
+                              )}
+                            </h6>
+                            <div className="bg-light p-3 rounded">
+                              {Array.isArray(metadataToShow) ? (
+                                // If metadata is directly an array, display each record
+                                metadataToShow.map((meta, index) => (
+                                  <div key={index} className="mb-2">
+                                    <strong>Record {index + 1}:</strong>
+                                    <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
+                                      {JSON.stringify(meta, null, 2)}
+                                    </pre>
                                   </div>
-                                  <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
-                                    {JSON.stringify(currentFrame.metadata, null, 2)}
-                                  </pre>
-                                </div>
+                                ))
+                              ) : metadataToShow.content && Array.isArray(metadataToShow.content) ? (
+                                // If metadata has a content array, display just the content
+                                metadataToShow.content.map((meta, index) => (
+                                  <div key={index} className="mb-2">
+                                    <strong>Record {index + 1}:</strong>
+                                    <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
+                                      {JSON.stringify(meta, null, 2)}
+                                    </pre>
+                                  </div>
+                                ))
+                              ) : metadataToShow && typeof metadataToShow === 'object' && !Array.isArray(metadataToShow) ? (
+                                // If metadata is a single object (like image metadata), display it directly
+                                <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
+                                  {JSON.stringify(metadataToShow, null, 2)}
+                                </pre>
                               ) : (
-                                <div className="text-muted">
-                                  <i className="fas fa-info-circle me-2"></i>
-                                  No metadata available for current frame
-                                </div>
-                              );
-                            })()}
+                                // Fallback: display the metadata object
+                                <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
+                                  {JSON.stringify(metadataToShow, null, 2)}
+                                </pre>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        );
+                      })()}
 
                       {/* Module Data Display */}
-                      {module.type === 'image' && renderImagingModule(module)}
+                      {module.type === 'image' && renderImagingModule(module, moduleNode)}
                       {module.type !== 'image' && module.data && Object.keys(module.data).length > 0 && (
                         <div className="mt-3">
                           <h6 className="text-success">
@@ -1235,7 +1365,7 @@ const UMDFViewer = () => {
 
               {/* Encounters and Module Cards */}
               {encounters.length > 0 ? (
-                encounters.map((encounter, index) => renderEncounter(encounter))
+                encounters.map((encounter, index) => renderEncounter(encounter, index))
               ) : modules.length > 0 ? (
                 // Fallback to old module display if no encounters
                 modules.map((module, index) => (
@@ -1292,14 +1422,14 @@ const UMDFViewer = () => {
                       )}
                       
                       {/* Module Data Display */}
-                      {module.type === 'image' && renderImagingModule(module)}
+                      {module.type === 'image' && renderImagingModule(module, null)}
                       {module.type !== 'image' && module.data && Object.keys(module.data).length > 0 && (
                         <div className="mt-3">
                           <h6 className="text-success">
                             <i className="fas fa-database me-2"></i>
                             Module Data
                           </h6>
-                          <pre className="bg-light p-3 rounded" style={{maxHeight: '200px', overflowY: 'auto'}}>
+                          <pre className="bg-light p-0" style={{maxHeight: '200px', overflowY: 'auto'}}>
                             {JSON.stringify(module.data, null, 2)}
                           </pre>
                         </div>
