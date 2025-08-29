@@ -64,6 +64,16 @@ class UMDFImporter:
             print(f"Temporary file exists: {os.path.exists(temp_path)}")
             print(f"Temporary file size: {os.path.getsize(temp_path) if os.path.exists(temp_path) else 'N/A'}")
             
+            # Add file header inspection for debugging
+            if os.path.exists(temp_path):
+                try:
+                    with open(temp_path, 'rb') as f:
+                        header_bytes = f.read(64)  # Read first 64 bytes to inspect header
+                        print(f"File header (first 64 bytes): {header_bytes.hex()}")
+                        print(f"File header as string: {header_bytes.decode('utf-8', errors='ignore')}")
+                except Exception as header_error:
+                    print(f"Could not read file header: {header_error}")
+            
             try:
                 # Open the file using the C++ reader
                 print("Opening UMDF file with reader.openFile...")
@@ -90,8 +100,20 @@ class UMDFImporter:
             print(f"File info received: {type(file_info)}")
             print(f"File info content: {file_info}")
             
-            # Close the file
-            self.reader.reader.closeFile()
+            # Debug: Check if schema_path is in the modules data
+            if file_info and 'modules' in file_info:
+                print("=== DEBUG: Checking modules for schema_path ===")
+                for i, module in enumerate(file_info['modules']):
+                    print(f"Module {i}: {module}")
+                    if 'schema_path' in module:
+                        print(f"  ✓ Module {i} has schema_path: {module['schema_path']}")
+                    else:
+                        print(f"  ✗ Module {i} missing schema_path")
+                        print(f"    Available keys: {list(module.keys())}")
+                print("=== END DEBUG ===")
+            
+            # Don't close the file yet - we need it open for getModuleData calls
+            # self.reader.reader.closeFile()
             
             # Check if the file info indicates success
             if not file_info or not file_info.get('success', False):
@@ -112,10 +134,16 @@ class UMDFImporter:
             
             # Create module entries from the modules array
             for module_data in modules_data:
+                print(f"=== DEBUG: Processing module_data ===")
+                print(f"  module_data: {module_data}")
+                print(f"  Available keys: {list(module_data.keys())}")
+                print(f"  schema_path value: {module_data.get('schema_path', 'NOT_FOUND')}")
+                
                 module = {
                     "id": module_data.get('uuid', 'unknown'),
                     "name": f"UMDF_Module_{module_data.get('type', 'unknown')}",
-                    "schema_id": "unknown",
+                    "schema_id": module_data.get('schema_id', 'unknown'),
+                    "schema_path": module_data.get('schema_path', 'unknown'),  # New field for schema path
                     "type": module_data.get('type', 'unknown'),
                     "schema_url": "unknown",
                     "metadata": {"uuid": module_data.get('uuid', 'unknown')},
@@ -123,9 +151,10 @@ class UMDFImporter:
                     "created_at": datetime.now().isoformat(),
                     "source_file": filename
                 }
+                print(f"  Created module: {module}")
                 modules.append(module)
             
-            return {
+            result = {
                 "file_type": "umdf",
                 "file_path": filename,
                 "modules": modules,
@@ -134,6 +163,14 @@ class UMDFImporter:
                 "encounters": encounters,
                 "module_graph": module_graph
             }
+            
+            print("=== DEBUG: Final result being returned ===")
+            print(f"  modules count: {len(modules)}")
+            for i, module in enumerate(modules):
+                print(f"  Module {i} schema_path: {module.get('schema_path', 'NOT_FOUND')}")
+            print("=== END DEBUG ===")
+            
+            return result
             
         except Exception as e:
             print(f"Error in import_file: {e}")
@@ -158,4 +195,17 @@ class UMDFImporter:
         with open(file_path, 'rb') as f:
             file_content = f.read()
         
-        return self.import_file(file_content, os.path.basename(file_path)) 
+        return self.import_file(file_content, os.path.basename(file_path))
+    
+    def close_file(self):
+        """Close the currently open file when done with it."""
+        if hasattr(self, 'reader') and self.reader and hasattr(self.reader, 'reader'):
+            try:
+                self.reader.reader.closeFile()
+                print("UMDF file closed successfully")
+            except Exception as e:
+                print(f"Warning: Error closing file: {e}")
+    
+    def __del__(self):
+        """Cleanup when the importer is destroyed."""
+        self.close_file() 
