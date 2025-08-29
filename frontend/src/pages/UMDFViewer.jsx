@@ -124,6 +124,12 @@ const UMDFViewer = () => {
               // Continue without storing in sessionStorage
             }
             
+            // Debug: Log what modules we're setting in state
+            console.log('🔍 DEBUG: Setting modules in state:', result.modules);
+            result.modules.forEach((module, index) => {
+              console.log(`  Module ${index}: id=${module.id}, name="${module.name}", type=${module.type}`);
+            });
+            
             // Set full modules, encounters, and module graph in component state
             setModules(result.modules);
             setEncounters(result.encounters || []);
@@ -826,7 +832,7 @@ const UMDFViewer = () => {
                     <div className="card-header bg-primary text-white">
                       <h5 className="mb-0">
                         <i className="fas fa-cube me-2"></i>
-                        {capitalizeFirst(module.type)} Module
+                        {module.name || `${capitalizeFirst(module.type)} Module`}
                       </h5>
                     </div>
                     <div className="card-body px-5 py-4">
@@ -1242,7 +1248,7 @@ const UMDFViewer = () => {
                   <div key={index} className="card mb-4" style={{maxWidth: '95vw', margin: '0 auto'}}>
                     <div className="card-body px-4 py-2">
                       <h4 className="card-title mb-3">
-                        {capitalizeFirst(module.type)} Module
+                        {module.name || `${capitalizeFirst(module.type)} Module`}
                       </h4>
                       
                       <div className="row mb-3">

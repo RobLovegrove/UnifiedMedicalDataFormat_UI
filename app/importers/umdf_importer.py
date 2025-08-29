@@ -10,6 +10,49 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+def get_schema_title(schema_path: str, base_dir: str = None) -> str:
+    """
+    Read a schema JSON file and extract the title field.
+    
+    Args:
+        schema_path: The schema path from the module (e.g., './schemas/image/v1.0.json')
+        base_dir: Base directory to resolve relative paths (defaults to project root)
+    
+    Returns:
+        The title from the schema, or a fallback name if schema can't be read
+    """
+    try:
+        # Resolve the schema path
+        if base_dir is None:
+            base_dir = project_root
+        
+        # Handle relative paths starting with ./
+        if schema_path.startswith('./'):
+            schema_path = schema_path[2:]  # Remove ./
+        
+        # Construct full path
+        full_path = os.path.join(base_dir, schema_path)
+        
+        print(f"🔍 DEBUG: Reading schema from: {full_path}")
+        
+        # Check if file exists
+        if not os.path.exists(full_path):
+            print(f"⚠️  Warning: Schema file not found: {full_path}")
+            return "Unknown Schema"
+        
+        # Read and parse the JSON
+        with open(full_path, 'r', encoding='utf-8') as f:
+            schema_data = json.load(f)
+        
+        # Extract the title
+        title = schema_data.get('title', 'Unknown Schema')
+        print(f"✅ Successfully read schema title: {title}")
+        return title
+        
+    except Exception as e:
+        print(f"❌ Error reading schema {schema_path}: {e}")
+        return "Unknown Schema"
+
 try:
     from cpp_interface.umdf_interface import UMDFReader, read_umdf_file
     print("Successfully imported UMDF interface")
@@ -139,11 +182,22 @@ class UMDFImporter:
                 print(f"  Available keys: {list(module_data.keys())}")
                 print(f"  schema_path value: {module_data.get('schema_path', 'NOT_FOUND')}")
                 
+                # Get the schema title for a meaningful module name
+                schema_path = module_data.get('schema_path', 'unknown')
+                if schema_path != 'unknown':
+                    schema_title = get_schema_title(schema_path)
+                    module_name = f"{schema_title.title()} Module"
+                else:
+                    module_name = f"UMDF_Module_{module_data.get('type', 'unknown')}"
+                
+                print(f"  Schema title: {schema_title if schema_path != 'unknown' else 'N/A'}")
+                print(f"  Final module name: {module_name}")
+                
                 module = {
                     "id": module_data.get('uuid', 'unknown'),
-                    "name": f"UMDF_Module_{module_data.get('type', 'unknown')}",
+                    "name": module_name,
                     "schema_id": module_data.get('schema_id', 'unknown'),
-                    "schema_path": module_data.get('schema_path', 'unknown'),  # New field for schema path
+                    "schema_path": schema_path,  # New field for schema path
                     "type": module_data.get('type', 'unknown'),
                     "schema_url": "unknown",
                     "metadata": {"uuid": module_data.get('uuid', 'unknown')},
