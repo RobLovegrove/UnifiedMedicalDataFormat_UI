@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './HomePage.css';
 
@@ -7,8 +7,39 @@ const HomePage = () => {
   const fileInputRef = useRef(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [showFileInfo, setShowFileInfo] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+
+  // Check if user has already logged in
+  useEffect(() => {
+    const storedUsername = sessionStorage.getItem('umdf_username');
+    const storedPassword = sessionStorage.getItem('umdf_password');
+    
+    if (!storedUsername || !storedPassword) {
+      setShowLoginModal(true);
+    }
+  }, []);
+
+  const handleLogin = () => {
+    if (username.trim() && password.trim()) {
+      // Store credentials in session storage
+      sessionStorage.setItem('umdf_username', username.trim());
+      sessionStorage.setItem('umdf_password', password);
+      setShowLoginModal(false);
+    }
+  };
 
   const handleFileSelect = () => {
+    // Check if user is logged in
+    const storedUsername = sessionStorage.getItem('umdf_username');
+    const storedPassword = sessionStorage.getItem('umdf_password');
+    
+    if (!storedUsername || !storedPassword) {
+      setShowLoginModal(true);
+      return;
+    }
+    
     // Trigger the hidden file input
     fileInputRef.current.click();
   };
@@ -81,11 +112,40 @@ const HomePage = () => {
       <div className="header-section">
         <div className="container-fluid">
           <div className="row">
-            <div className="col-12 text-center py-4">
-              <h1 className="header-logo mb-0">
-                <i className="fas fa-heartbeat me-3"></i>
-                Medical File Format
-              </h1>
+            <div className="col-12 py-4">
+              <div className="d-flex justify-content-between align-items-center">
+                <div className="text-center flex-grow-1">
+                  <h1 className="header-logo mb-0">
+                    <i className="fas fa-heartbeat me-3"></i>
+                    Medical File Format
+                  </h1>
+                </div>
+                
+                {/* User Info at Far Right */}
+                <div className="user-info-container">
+                  {sessionStorage.getItem('umdf_username') && (
+                    <div className="user-info-card">
+                      <div className="d-flex align-items-center gap-2">
+                        <small className="text-muted">
+                          <i className="fas fa-user me-1"></i>
+                          Logged in as: <strong>{sessionStorage.getItem('umdf_username')}</strong>
+                        </small>
+                        <button
+                          className="btn btn-outline-secondary btn-sm"
+                          onClick={() => {
+                            sessionStorage.removeItem('umdf_username');
+                            sessionStorage.removeItem('umdf_password');
+                            setShowLoginModal(true);
+                          }}
+                        >
+                          <i className="fas fa-sign-out-alt me-1"></i>
+                          Change User
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -174,6 +234,8 @@ const HomePage = () => {
                           </div>
                         </div>
                       </div>
+                      
+
                     </div>
                   </div>
                 </div>
@@ -182,6 +244,62 @@ const HomePage = () => {
           </div>
         </div>
       </div>
+
+      {/* Login Modal */}
+      {showLoginModal && (
+        <div className="modal fade show" style={{display: 'block', zIndex: 1050}} tabIndex="-1">
+          <div className="modal-dialog modal-dialog-centered" style={{zIndex: 1051}}>
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">
+                  <i className="fas fa-user-lock me-2"></i>
+                  Authentication Required
+                </h5>
+              </div>
+              <div className="modal-body">
+                <p className="text-muted mb-3">
+                  Please provide your credentials to access UMDF files. These will be used as the file author and password for encrypted files.
+                </p>
+                <div className="mb-3">
+                  <label htmlFor="username" className="form-label">Username</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    id="username"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="Enter your username"
+                    autoFocus
+                  />
+                </div>
+                <div className="mb-3">
+                  <label htmlFor="password" className="form-label">Password</label>
+                  <input
+                    type="password"
+                    className="form-control"
+                    id="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter your password"
+                  />
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleLogin}
+                  disabled={!username.trim() || !password.trim()}
+                >
+                  <i className="fas fa-sign-in-alt me-2"></i>
+                  Login
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="modal-backdrop fade show" style={{zIndex: 1049}}></div>
+        </div>
+      )}
     </div>
   );
 };

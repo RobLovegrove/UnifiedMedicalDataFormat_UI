@@ -1,8 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import ProcessingModal from '../components/ProcessingModal';
+import CustomSlider from '../components/CustomSlider';
 import './UMDFViewer.css';
 
 const UMDFViewer = () => {
   const [modules, setModules] = useState([]);
+  const [encounters, setEncounters] = useState([]);
+  const [moduleGraph, setModuleGraph] = useState({});
   const [showSuccessBar, setShowSuccessBar] = useState(false);
   const [showErrorBar, setShowErrorBar] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -19,6 +23,32 @@ const UMDFViewer = () => {
     };
   }, []);
   
+  // Load module data when encounters are available
+  useEffect(() => {
+    if (encounters.length > 0) {
+      console.log(`🔄 Loading data for ${encounters.length} encounters`);
+      console.log('📋 Encounters:', encounters);
+      
+      encounters.forEach((encounter, encounterIndex) => {
+        const { module_tree } = encounter;
+        
+        if (module_tree && module_tree.length > 0) {
+          console.log(`📦 Loading data for ${module_tree.length} modules in encounter ${encounter.encounter_id}`);
+          console.log('🔍 Module tree:', module_tree);
+          
+          // Load modules sequentially with a delay to avoid overwhelming the server
+          module_tree.forEach((moduleNode, moduleIndex) => {
+            const totalDelay = (encounterIndex * 1000) + (moduleIndex * 300); // 1s between encounters, 300ms between modules
+            console.log(`⏰ Scheduling module ${moduleNode.id} to load in ${totalDelay}ms`);
+            setTimeout(() => {
+              loadModule(moduleNode.id);
+            }, totalDelay);
+          });
+        }
+      });
+    }
+  }, [encounters]);
+  
   // Process file and load modules on component mount
   useEffect(() => {
     const processFile = async () => {
@@ -26,6 +56,9 @@ const UMDFViewer = () => {
       const fileData = sessionStorage.getItem('umdf_file_data');
       
       if (fileReady === 'true' && fileData) {
+        // Clear any old module metadata when processing a new file
+        sessionStorage.removeItem('umdf_modules_metadata');
+        
         setIsProcessing(true);
         setProcessingMessage('Processing UMDF file...');
         
@@ -37,6 +70,12 @@ const UMDFViewer = () => {
           // Create FormData for upload
           const formData = new FormData();
           formData.append('file', fileBlob, sessionStorage.getItem('umdf_file_name'));
+          
+          // Add password from session storage
+          const storedPassword = sessionStorage.getItem('umdf_password');
+          if (storedPassword) {
+            formData.append('password', storedPassword);
+          }
           
           // Send to backend for C++ processing
           const response = await fetch('/api/upload/umdf', {
@@ -77,8 +116,10 @@ const UMDFViewer = () => {
               // Continue without storing in sessionStorage
             }
             
-            // Set full modules in component state (this won't persist across page refreshes)
+            // Set full modules, encounters, and module graph in component state
             setModules(result.modules);
+            setEncounters(result.encounters || []);
+            setModuleGraph(result.module_graph || {});
             setShowSuccessBar(true);
             
             // Clear processing state
@@ -139,6 +180,8 @@ const UMDFViewer = () => {
     sessionStorage.removeItem('umdf_file_data');
     sessionStorage.removeItem('umdf_file_ready');
     setModules([]);
+    setEncounters([]);
+    setModuleGraph({});
     setShowErrorBar(true);
     setErrorMessage('Cache cleared - ready for new file');
     setShowSuccessBar(false);
@@ -147,11 +190,24 @@ const UMDFViewer = () => {
     setTimeout(() => setShowErrorBar(false), 2000);
   };
 
+  // Format file size to human-readable format
+  const formatFileSize = (bytes) => {
+    if (!bytes || bytes === '0') return '0 Bytes';
+    const size = parseInt(bytes);
+    if (size === 0) return '0 Bytes';
+    
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(size) / Math.log(k));
+    
+    return parseFloat((size / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
   // Get file info from sessionStorage
   const getFileInfo = () => {
     const fileName = sessionStorage.getItem('umdf_file_name') || 'Unknown file';
     const fileSize = sessionStorage.getItem('umdf_file_size') || '0';
-    return { fileName, fileSize };
+    return { fileName, fileSize: formatFileSize(fileSize) };
   };
 
   // Format date for display
@@ -556,16 +612,15 @@ const UMDFViewer = () => {
                       <label className="form-label text-muted mb-2">
                         {dimName}: <span className="text-primary">1-{dim}</span>
                       </label>
-                      <div className="custom-slider me-4" data-dimension={index + 2} data-module-id={module.id || 'unknown'}>
-                        <div className="slider-track">
-                          <div className="slider-fill" style={{width: '0%'}}></div>
-                          <div className="slider-thumb" style={{left: '0%'}}></div>
-                        </div>
-                        <input type="hidden" className="slider-value" defaultValue="1" min="1" max={dim} />
-                        <div className="small text-muted mt-1">
-                          Current: <span className="current-value">1</span>
-                        </div>
-                      </div>
+                      <CustomSlider
+                        value={sliderValues[`${module.id || 'unknown'}_${index + 2}`] || 1}
+                        min={1}
+                        max={dim}
+                        onChange={(newValue) => updateSliderValue(module.id || 'unknown', index + 2, newValue)}
+                        moduleId={module.id || 'unknown'}
+                        dimension={index + 2}
+                        className="me-4"
+                      />
                     </div>
                   );
                 })}
@@ -575,6 +630,179 @@ const UMDFViewer = () => {
         </div>
       </div>
     );
+  };
+
+  // Render encounter with its module tree
+  const renderEncounter = (encounter) => {
+    const { encounter_id, module_tree } = encounter;
+    
+    return (
+      <div key={encounter_id} className="card mb-4" style={{maxWidth: '90vw', margin: '0 auto'}}>
+        <div className="card-body px-5 py-4">
+          <h4 className="card-title mb-4 text-center" style={{color: '#667eea'}}>
+            <i className="fas fa-hospital me-2"></i>
+            Encounter: {encounter_id.substring(0, 8)}...
+          </h4>
+          
+          <div className="module-tree">
+            {module_tree.map((moduleNode, index) => {
+              const module = modules.find(m => m.id === moduleNode.id);
+              if (!module) return null;
+              
+              return (
+                <div key={index} className="module-node mb-4">
+                  <div className="card border-primary" style={{width: '100%'}}>
+                    <div className="card-header bg-primary text-white">
+                      <h5 className="mb-0">
+                        <i className="fas fa-cube me-2"></i>
+                        {capitalizeFirst(module.type)} Module
+                      </h5>
+                    </div>
+                    <div className="card-body px-5 py-4">
+                      <div className="module-info-container mb-4">
+                        <div className="row justify-content-center">
+                          <div className="col-md-4">
+                            <div className="module-info-section text-center">
+                              <p className="mb-3">
+                                <strong>Module ID:</strong> <br/>
+                                <span className="text-muted">{module.id || 'N/A'}</span>
+                              </p>
+                              <p className="mb-3">
+                                <strong>Type:</strong> <br/>
+                                <span className="text-muted">{capitalizeFirst(module.type)}</span>
+                              </p>
+                              <p className="mb-3">
+                                <strong>Created:</strong> <br/>
+                                <span className="text-muted">{formatDate(module.created_at)}</span>
+                              </p>
+                            </div>
+                          </div>
+                          <div className="col-md-4">
+                            <div className="module-info-section text-center">
+                              <p className="mb-3">
+                                <strong>Schema ID:</strong> <br/>
+                                <span className="text-muted">{module.schema_id || 'N/A'}</span>
+                              </p>
+                              <p className="mb-3">
+                                <strong>Source File:</strong> <br/>
+                                <span className="text-muted">{module.source_file || 'N/A'}</span>
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Derived Modules */}
+                      {moduleNode.derives && moduleNode.derives.length > 0 && (
+                        <div className="mb-4 text-center">
+                          <h6 className="text-success mb-3">
+                            <i className="fas fa-arrow-down me-2"></i>
+                            Derived Modules:
+                          </h6>
+                          <div className="list-group" style={{maxWidth: '80%', margin: '0 auto'}}>
+                            {moduleNode.derives.map((derived, idx) => {
+                              const derivedModule = modules.find(m => m.id === derived.id);
+                              return (
+                                <div key={idx} className="list-group-item list-group-item-success text-center">
+                                  <strong>{derivedModule?.type || 'Unknown'}</strong> - {derived.id}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Annotating Modules */}
+                      {moduleNode.annotated_by && moduleNode.annotated_by.length > 0 && (
+                        <div className="mb-4 text-center">
+                          <h6 className="text-info mb-3">
+                            <i className="fas fa-comment me-2"></i>
+                            Annotated By:
+                          </h6>
+                          <div className="list-group" style={{maxWidth: '80%', margin: '0 auto'}}>
+                            {moduleNode.annotated_by.map((annotator, idx) => {
+                              const annotatorModule = modules.find(m => m.id === annotator.id);
+                              return (
+                                <div key={idx} className="list-group-item list-group-item-info text-center">
+                                  <strong>{annotatorModule?.type || 'Unknown'}</strong> - {annotator.id}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Module Data Display - Only show if data exists */}
+                      {module.type === 'image' && renderImagingModule(module)}
+                      {module.type !== 'image' && module.data && Object.keys(module.data).length > 0 && (
+                        <div className="mt-3">
+                          <h6>Module Data</h6>
+                          <pre className="bg-light p-2 rounded" style={{maxHeight: '200px', overflowY: 'auto'}}>
+                            {JSON.stringify(module.data, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                      
+                      {/* Show message if no data available */}
+                      {module.type !== 'image' && (!module.data || Object.keys(module.data).length === 0) && (
+                        <div className="mt-3 text-center">
+                          <div className="text-muted">
+                            <i className="fas fa-info-circle me-2"></i>
+                            Module data not yet loaded from file
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Load module data from the C++ reader
+  const loadModule = async (moduleId) => {
+    try {
+      console.log(`🚀 Loading data for module: ${moduleId}`);
+      
+      // Call the C++ reader to get module data
+      console.log(`📡 Making request to: /api/module/${moduleId}/data`);
+      const response = await fetch(`/api/module/${moduleId}/data`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      console.log(`📥 Response status: ${response.status}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      console.log(`📋 Response data:`, result);
+      
+      if (result.success) {
+        // Update the module with the loaded data
+        console.log(`✅ Updating module ${moduleId} with data:`, result.data);
+        setModules(prevModules => 
+          prevModules.map(module => 
+            module.id === moduleId 
+              ? { ...module, data: result.data }
+              : module
+          )
+        );
+        console.log(`🎉 Successfully loaded data for module: ${moduleId}`);
+      } else {
+        console.error(`❌ Failed to load module data: ${result.error}`);
+      }
+    } catch (error) {
+      console.error(`💥 Error loading module data for ${moduleId}:`, error);
+    }
   };
 
   const { fileName, fileSize } = getFileInfo();
@@ -599,41 +827,72 @@ const UMDFViewer = () => {
           <div className="row">
             <div className="col-12">
               {/* Title Card */}
-              <div className="card mb-4" style={{maxWidth: '95vw', margin: '0 auto'}}>
-                <div className="card-body p-4">
+              <div className="card mb-4" style={{maxWidth: '90vw', margin: '0 auto'}}>
+                <div className="card-body px-5 py-3">
                   <div className="d-flex justify-content-between align-items-start">
-                    <div>
+                    <div className="text-center flex-grow-1">
                       <h2 className="mb-2" style={{color: '#667eea'}}>UMDF File Viewer</h2>
                       <p className="text-muted mb-0">
-                        File: {fileName} ({fileSize} bytes)
+                        File: {fileName} ({fileSize} bytes) • {modules.length} module{modules.length !== 1 ? 's' : ''} found
+                        {encounters.length > 0 && ` • ${encounters.length} encounter${encounters.length !== 1 ? 's' : ''}`}
                       </p>
                     </div>
                     <div className="d-flex gap-2">
                       <button
-                        className="btn btn-outline-primary btn-sm"
+                        className="btn btn-sm"
                         title="Import File"
-                        style={{border: 'none', padding: '0.5rem'}}
+                        style={{
+                          border: 'none', 
+                          padding: '0.5rem',
+                          backgroundColor: 'white',
+                          color: '#6c757d'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.target.style.color = '#667eea';
+                          e.target.querySelector('i').style.color = '#667eea';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.color = '#6c757d';
+                          e.target.querySelector('i').style.color = '#6c757d';
+                        }}
                       >
-                        <i className="fas fa-file-import fa-lg text-primary"></i>
+                        <i className="fas fa-file-import fa-lg" style={{color: '#6c757d'}}></i>
                       </button>
                       <button
-                        className="btn btn-outline-danger btn-sm"
+                        className="btn btn-sm"
                         title="Clear Cache"
                         onClick={clearCache}
-                        style={{border: 'none', padding: '0.5rem'}}
+                        style={{
+                          border: 'none', 
+                          padding: '0.5rem',
+                          backgroundColor: 'white',
+                          color: '#6c757d'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.target.style.color = '#dc3545';
+                          e.target.querySelector('i').style.color = '#dc3545';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.color = '#6c757d';
+                          e.target.querySelector('i').style.color = '#6c757d';
+                        }}
                       >
-                        <i className="fas fa-trash fa-lg text-danger"></i>
+                        <i className="fas fa-trash fa-lg" style={{color: '#6c757d'}}></i>
                       </button>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Module Cards */}
-              {modules.length > 0 ? (
+
+              {/* Encounters and Module Cards */}
+              {encounters.length > 0 ? (
+                encounters.map((encounter, index) => renderEncounter(encounter))
+              ) : modules.length > 0 ? (
+                // Fallback to old module display if no encounters
                 modules.map((module, index) => (
                   <div key={index} className="card mb-4" style={{maxWidth: '95vw', margin: '0 auto'}}>
-                    <div className="card-body p-4">
+                    <div className="card-body px-4 py-2">
                       <h4 className="card-title mb-3">
                         {capitalizeFirst(module.type)} Module
                       </h4>
@@ -667,7 +926,7 @@ const UMDFViewer = () => {
                         </div>
                       </div>
 
-                      {/* Metadata Section */}
+                      {/* Metadata Section - Only show if metadata exists */}
                       {module.metadata && Object.keys(module.metadata).length > 0 && (
                         <div className="metadata-section mb-3">
                           <h6 className="text-muted mb-2">Metadata:</h6>
@@ -679,7 +938,26 @@ const UMDFViewer = () => {
                         </div>
                       )}
 
-                      {renderModuleData(module)}
+                      {/* Module Data Display - Only show if data exists */}
+                      {module.type === 'image' && renderImagingModule(module)}
+                      {module.type !== 'image' && module.data && Object.keys(module.data).length > 0 && (
+                        <div className="mt-3">
+                          <h6>Module Data</h6>
+                          <pre className="bg-light p-2 rounded" style={{maxHeight: '200px', overflowY: 'auto'}}>
+                            {JSON.stringify(module.data, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                      
+                      {/* Show message if no data available */}
+                      {module.type !== 'image' && (!module.data || Object.keys(module.data).length === 0) && (
+                        <div className="mt-3 text-center">
+                          <div className="text-muted">
+                            <i className="fas fa-info-circle me-2"></i>
+                            Module data not yet loaded from file
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))
@@ -695,206 +973,31 @@ const UMDFViewer = () => {
 
       {/* Success Bar */}
       {showSuccessBar && (
-        <div className="success-bar">
-          <div className="container-fluid">
-            <div className="alert alert-success mb-0">
-              <i className="fas fa-check-circle me-2"></i>
-              File imported successfully! {modules.length} module(s) found.
-            </div>
-          </div>
+        <div className="alert alert-success alert-dismissible fade show position-fixed bottom-0 start-50 translate-middle-x mb-4" role="alert" style={{zIndex: 1050, maxWidth: '90vw', boxShadow: '0 4px 12px rgba(0,0,0,0.15)'}}>
+          <i className="fas fa-check-circle me-2"></i>
+          File processed successfully! {modules.length} module{modules.length !== 1 ? 's' : ''} loaded.
+          <button type="button" className="btn-close" onClick={() => setShowSuccessBar(false)}></button>
         </div>
       )}
 
       {/* Error Bar */}
       {showErrorBar && (
-        <div className="error-bar">
-          <div className="container-fluid">
-            <div className="alert alert-danger mb-0">
-              <i className="fas fa-exclamation-circle me-2"></i>
-              {errorMessage}
-            </div>
-          </div>
+        <div className="alert alert-danger alert-dismissible fade show position-fixed bottom-0 start-50 translate-middle-x mb-4" role="alert" style={{zIndex: 1050, maxWidth: '90vw', boxShadow: '0 4px 12px rgba(0,0,0,0.15)'}}>
+          <i className="fas fa-exclamation-circle me-2"></i>
+          {errorMessage}
+          <button type="button" className="btn-close" onClick={() => setShowErrorBar(false)}></button>
         </div>
       )}
 
-      {/* Processing Overlay */}
-      {isProcessing && (
-        <div className="processing-overlay">
-          <div className="processing-content">
-            <div className="spinner-border text-primary mb-3" role="status">
-              <span className="visually-hidden">Loading...</span>
-            </div>
-            <h5 className="text-primary mb-2">Processing UMDF File</h5>
-            <p className="text-muted mb-0">{processingMessage}</p>
-          </div>
-        </div>
-      )}
+      {/* Processing Modal */}
+      <ProcessingModal 
+        isVisible={isProcessing}
+        fileName={sessionStorage.getItem('umdf_file_name')}
+        fileSize={sessionStorage.getItem('umdf_file_size')}
+        fileType="UMDF"
+      />
     </div>
   );
 };
 
-export default UMDFViewer;
-
-// Custom CSS for sliders
-const sliderStyles = `
-  .custom-slider {
-    position: relative;
-    width: 150px;
-    height: 20px;
-    margin: 10px 0;
-  }
-
-  .slider-track {
-    position: relative;
-    width: 100%;
-    height: 8px;
-    background: #e9ecef;
-    border-radius: 4px;
-    cursor: pointer;
-    box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
-  }
-
-  .slider-fill {
-    position: absolute;
-    top: 0;
-    left: 0;
-    height: 100%;
-    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-    border-radius: 4px;
-    transition: width 0.05s ease-out;
-    box-shadow: inset 0 1px 2px rgba(255,255,255,0.3);
-  }
-
-  .slider-thumb {
-    position: absolute;
-    top: -6px;
-    left: 0%;
-    width: 20px;
-    height: 20px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border: 3px solid #fff;
-    border-radius: 50%;
-    cursor: pointer;
-    box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
-    transition: left 0.05s ease-out, transform 0.2s ease;
-  }
-
-  .slider-thumb:hover {
-    background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
-    transform: scale(1.15);
-    box-shadow: 0 6px 12px rgba(102, 126, 234, 0.4);
-  }
-`;
-
-// Inject the styles into the document
-if (typeof document !== 'undefined') {
-  const styleSheet = document.createElement('style');
-  styleSheet.textContent = sliderStyles;
-  document.head.appendChild(styleSheet);
-  
-  // Add event handlers for custom sliders
-  document.addEventListener('click', function(e) {
-    if (e.target.closest('.slider-track')) {
-      const slider = e.target.closest('.custom-slider');
-      const track = slider.querySelector('.slider-track');
-      const thumb = slider.querySelector('.slider-thumb');
-      const fill = slider.querySelector('.slider-fill');
-      const valueInput = slider.querySelector('.slider-value');
-      
-      const rect = track.getBoundingClientRect();
-      const clickX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
-      const percentage = (clickX / rect.width) * 100;
-      
-      // Update visual elements with precise positioning
-      thumb.style.left = percentage + '%';
-      fill.style.width = percentage + '%';
-      
-      // Calculate and update value with proper rounding
-      const min = parseInt(valueInput.getAttribute('min'));
-      const max = parseInt(valueInput.getAttribute('max'));
-      const value = Math.round(min + (percentage / 100) * (max - min));
-      valueInput.value = value;
-      
-      // Update the current value display
-      const currentValueSpan = slider.querySelector('.current-value');
-      if (currentValueSpan) {
-        currentValueSpan.textContent = value;
-      }
-      
-      // Trigger update function
-      const moduleId = slider.getAttribute('data-module-id');
-      const dimension = parseInt(slider.getAttribute('data-dimension'));
-      console.log(`Module ${moduleId}: Dimension ${dimension} changed to ${value}`);
-      
-      // Call global update function if it exists
-      if (window.updateSliderValueGlobal) {
-        window.updateSliderValueGlobal(moduleId, dimension, value);
-      }
-    }
-  });
-  
-  // Drag functionality for sliders
-  document.addEventListener('mousedown', function(e) {
-    if (e.target.closest('.slider-thumb')) {
-      const thumb = e.target.closest('.slider-thumb');
-      const slider = thumb.closest('.custom-slider');
-      const track = slider.querySelector('.slider-track');
-      const fill = slider.querySelector('.slider-fill');
-      const valueInput = slider.querySelector('.slider-value');
-      
-      let isDragging = true;
-      
-      // Disable transitions during drag for instant response
-      thumb.style.transition = 'none';
-      fill.style.transition = 'none';
-      
-      function onMouseMove(e) {
-        if (!isDragging) return;
-        
-        const rect = track.getBoundingClientRect();
-        const mouseX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
-        const percentage = (mouseX / rect.width) * 100;
-        
-        // Update visual elements with precise positioning
-        thumb.style.left = percentage + '%';
-        fill.style.width = percentage + '%';
-        
-        // Calculate and update value with proper rounding
-        const min = parseInt(valueInput.getAttribute('min'));
-        const max = parseInt(valueInput.getAttribute('max'));
-        const value = Math.round(min + (percentage / 100) * (max - min));
-        valueInput.value = value;
-        
-        // Update the current value display
-        const currentValueSpan = slider.querySelector('.current-value');
-        if (currentValueSpan) {
-          currentValueSpan.textContent = value;
-        }
-        
-        // Trigger update function
-        const moduleId = slider.getAttribute('data-module-id');
-        const dimension = parseInt(slider.getAttribute('data-dimension'));
-        console.log(`Module ${moduleId}: Dimension ${dimension} changed to ${value}`);
-        
-        // Call global update function if it exists
-        if (window.updateSliderValueGlobal) {
-          window.updateSliderValueGlobal(moduleId, dimension, value);
-        }
-      }
-      
-      function onMouseUp() {
-        isDragging = false;
-        
-        // Re-enable transitions after drag for smooth hover effects
-        thumb.style.transition = '';
-        fill.style.transition = '';
-        
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
-      }
-      
-      document.addEventListener('mousemove', onMouseMove);
-      document.addEventListener('mouseup', onMouseUp);
-    }
-  });
-} 
+export default UMDFViewer; 

@@ -1,25 +1,38 @@
 #!/bin/bash
 
-# Build script for UMDF Python interface
+# Build script for UMDF Python bindings in UMDF_UI
+# This script builds the Python extension using the main UMDF project's bindings
 
 set -e
 
-echo "Building UMDF Python interface..."
+echo "Building UMDF Python bindings for UMDF_UI..."
 
-# Create build directory
-mkdir -p build
-cd build
+# Check if we're in the right directory
+if [ ! -f "setup.py" ]; then
+    echo "Error: setup.py not found. Please run this script from the cpp_interface directory."
+    exit 1
+fi
 
-# Configure with CMake
-cmake ..
+# Check if UMDF project exists
+if [ ! -d "../../UMDF" ]; then
+    echo "Error: UMDF project directory not found. Please ensure the UMDF project is in the parent directory of UMDF_UI."
+    echo "Expected path: ../../UMDF"
+    exit 1
+fi
 
-# Build the library
-make -j$(nproc)
+# Clean previous builds
+echo "Cleaning previous builds..."
+rm -rf build/ dist/ *.egg-info/
 
-echo "Build completed!"
-echo "Library should be available at: build/libumdf_python.dylib"
+# Install in development mode
+echo "Installing in development mode..."
+pip install -e .
 
-# Copy the library to the parent directory for Python to find
-cp libumdf_python.dylib ../umdf_python.dylib 2>/dev/null || cp libumdf_python.so ../umdf_python.so 2>/dev/null || cp umdf_python.dll ../umdf_python.dll 2>/dev/null || echo "Library not found"
-
-echo "Library copied to cpp_interface directory" 
+echo "✓ Build completed successfully!"
+echo ""
+echo "You can now test the bindings by running:"
+echo "  cd .."
+echo "  python test_pybind11.py"
+echo ""
+echo "Or import in Python:"
+echo "  from cpp_interface.umdf_interface import UMDFReader, UMDFWriter" 

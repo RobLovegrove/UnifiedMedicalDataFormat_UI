@@ -218,3 +218,36 @@
 .error-message button:hover {
   background: #5a6fd8;
 } 
+
+/* User info card styling */
+.user-info-container {
+  position: absolute;
+  right: 2rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.user-info-card {
+  padding: 0.75rem 1rem;
+  min-width: 200px;
+}
+
+/* Module card styling */
+.module-node .card {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+.module-info-container {
+  width: 100%;
+}
+
+.module-info-section {
+  padding: 0 1rem;
+}
+
+/* Ensure encounter cards fill the space */
+.card[style*="maxWidth: '90vw'"] {
+  width: 90vw !important;
+  max-width: 90vw !important;
+} 

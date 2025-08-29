@@ -1,223 +1,234 @@
+#!/usr/bin/env python3
 """
-Python interface to the C++ UMDF reader/writer
+UMDF Interface - Python wrapper for the UMDF C++ library
+Provides a clean, Pythonic interface to the UMDF functionality
 """
 
-import os
 import sys
+import os
 import json
-from typing import Dict, Any, List, Optional
-from ctypes import cdll, c_char_p, c_void_p, c_int, c_size_t, c_double, POINTER, Structure, c_uint32, c_uint64, c_bool
-import numpy as np
+from typing import Dict, List, Any, Optional, Union
 
-# Add the current directory to Python path for imports
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
-
+# Import the main UMDF module
 try:
     import umdf_reader
-    print("Successfully imported umdf_reader module")
+    print("✓ Successfully imported umdf_reader module")
 except ImportError as e:
-    print(f"Warning: Could not import umdf_reader module: {e}")
-    umdf_reader = None
+    print(f"✗ Failed to import umdf_reader: {e}")
+    print("Make sure to run: pip install -e . from the cpp_interface directory")
+    sys.exit(1)
 
-class UMDFInterface:
-    """Python wrapper for the C++ UMDF reader/writer library."""
+class UMDFReader:
+    """High-level wrapper for reading UMDF files"""
     
     def __init__(self):
-        """Initialize the UMDF interface."""
-        self._lib = None
-        self._reader = None
-        
-        if umdf_reader:
-            try:
-                # Create a Reader instance
-                self._reader = umdf_reader.Reader()
-                print("Successfully created C++ Reader instance")
-            except Exception as e:
-                print(f"Warning: Could not create C++ Reader instance: {e}")
-                self._reader = None
+        self.reader = umdf_reader.Reader()
+        self.current_file = None
     
-    def can_read(self) -> bool:
-        """Check if the C++ reader is available."""
-        return self._reader is not None
-    
-    def get_supported_schemas(self) -> List[str]:
-        """Get list of supported schemas."""
-        if not self.can_read():
-            return []
-        
+    def read_file(self, filepath: str, password: str = "") -> bool:
+        """Open and read a UMDF file"""
         try:
-            # This would need to be implemented in C++ if you want to expose schema info
-            return ["umdf", "dicom", "fhir"]  # Placeholder
+            result = self.reader.openFile(filepath, password)
+            if result.success:
+                self.current_file = filepath
+                return True
+            else:
+                print(f"Failed to open file: {result.message}")
+                return False
         except Exception as e:
-            print(f"Error getting schemas: {e}")
-            return []
-    
-    def read_file(self, file_path: str) -> Optional[Dict[str, Any]]:
-        """
-        Read data from a UMDF file using the C++ reader.
-        
-        Args:
-            file_path: Path to UMDF file
-            
-        Returns:
-            Dictionary containing file data or None if failed
-        """
-        if not self.can_read():
-            print("C++ reader not available")
-            return None
-        
-        try:
-            print(f"Reading UMDF file: {file_path}")
-            
-            # Use the new convenience function that returns all modules at once
-            print("Calling read_umdf_file_all_modules...")
-            all_modules = umdf_reader.read_umdf_file_all_modules(file_path)
-            print(f"read_umdf_file_all_modules returned: {type(all_modules)}")
-            
-            if not all_modules or not all_modules.get('success', False):
-                print("Failed to read UMDF file or no success flag")
-                return {
-                    "modules": [],
-                    "file_info": {},
-                    "module_count": 0,
-                    "successful_modules": 0,
-                    "failed_modules": 0,
-                    "file_path": file_path
-                }
-            
-            # Extract modules from the result
-            raw_modules = all_modules.get('modules', [])
-            print(f"Found {len(raw_modules)} modules")
-            
-            if not raw_modules:
-                print("No modules found, returning empty result")
-                return {
-                    "modules": [],
-                    "file_info": {},
-                    "module_count": 0,
-                    "successful_modules": 0,
-                    "failed_modules": 0,
-                    "file_path": file_path
-                }
-            
-            # Process each module
-            modules = []
-            successful_modules = 0
-            failed_modules = 0
-            
-            for raw_module in raw_modules:
-                try:
-                    module_id = raw_module.get('module_id', 'unknown')
-                    print(f"Processing module: {module_id}")
-                    
-                    # Convert the raw module data to our expected format
-                    module = {
-                        "id": module_id,
-                        "name": f"Module_{module_id[:8]}",
-                        "schema_id": raw_module.get('schema_url', 'unknown').split('/')[-1].replace('.json', ''),
-                        "type": "unknown",  # We'll determine this from the data
-                        "schema_url": raw_module.get('schema_url', ''),
-                        "metadata": raw_module.get('metadata', {}),
-                        "data": raw_module.get('data', {}),
-                        "version": "1.0",
-                        "created": "",
-                        "dimensions": [],
-                        "pixel_data": None
-                    }
-                    
-                    # Try to determine module type from schema URL or data
-                    schema_url = raw_module.get('schema_url', '')
-                    if 'image' in schema_url.lower() or 'image' in str(raw_module.get('data', {})):
-                        module['type'] = 'image'
-                    elif 'patient' in schema_url.lower() or 'patient' in str(raw_module.get('data', {})):
-                        module['type'] = 'patient'
-                    else:
-                        module['type'] = 'data'
-                    
-                    # Handle pixel data if present (for image modules)
-                    if module['type'] == 'image' and 'data' in raw_module:
-                        # The data might contain pixel information
-                        # For now, we'll store the raw data and handle conversion later
-                        module['pixel_data'] = raw_module.get('data')
-                        
-                        # Try to extract dimensions from metadata if available
-                        metadata = raw_module.get('metadata', {})
-                        if 'dimensions' in metadata:
-                            module['dimensions'] = metadata['dimensions']
-                    
-                    modules.append(module)
-                    successful_modules += 1
-                    print(f"Successfully processed module {module_id}")
-                    
-                except Exception as e:
-                    print(f"Error processing module {raw_module.get('module_id', 'unknown')}: {e}")
-                    failed_modules += 1
-                    # Add a basic module entry for failed modules
-                    modules.append({
-                        "id": raw_module.get('module_id', 'unknown'),
-                        "name": f"Module_{raw_module.get('module_id', 'unknown')[:8]}",
-                        "schema_id": "unknown",
-                        "type": "unknown",
-                        "schema_url": "",
-                        "metadata": {},
-                        "data": {},
-                        "version": "1.0",
-                        "created": "",
-                        "dimensions": [],
-                        "pixel_data": None,
-                        "error": str(e)
-                    })
-            
-            print(f"Successfully processed {successful_modules} modules, {failed_modules} failed")
-            
-            return {
-                "modules": modules,
-                "file_info": {},
-                "module_count": len(modules),
-                "successful_modules": successful_modules,
-                "failed_modules": failed_modules,
-                "file_path": file_path
-            }
-            
-        except Exception as e:
-            print(f"Error reading UMDF file: {e}")
-            print(f"Exception type: {type(e)}")
-            import traceback
-            traceback.print_exc()
-            return None
-    
-    def write_file(self, file_path: str, data: Dict[str, Any]) -> bool:
-        """
-        Write data to a UMDF file using the C++ writer.
-        
-        Args:
-            file_path: Path to output file
-            data: Data to write
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        if not self._lib:
+            print(f"Error opening file {filepath}: {e}")
             return False
+    
+    def get_file_info(self) -> Dict[str, Any]:
+        """Get information about the currently open file"""
+        if not self.current_file:
+            raise RuntimeError("No file loaded. Call read_file() first.")
         
         try:
-            # Convert data to JSON string
-            json_data = json.dumps(data)
-            json_bytes = json_data.encode('utf-8')
-            
-            # Call C++ write function
-            result = self._lib.write_umdf_file(
-                file_path.encode('utf-8'),
-                json_bytes,
-                len(json_bytes)
-            )
-            
-            return bool(result)
+            file_info = self.reader.getFileInfo()
+            # Convert nlohmann::json to Python dict
+            return json.loads(file_info.dump()) if hasattr(file_info, 'dump') else file_info
         except Exception as e:
-            print(f"Error writing UMDF file: {e}")
+            print(f"Error getting file info: {e}")
+            return {}
+    
+    def get_module_data(self, module_id: str) -> Optional[Dict[str, Any]]:
+        """Get data for a specific module"""
+        if not self.current_file:
+            raise RuntimeError("No file loaded. Call read_file() first.")
+        
+        try:
+            result = self.reader.getModuleData(module_id)
+            if result.has_value():
+                module_data = result.value()
+                # Convert ModuleData to Python dict
+                return {
+                    'id': str(module_data.id) if hasattr(module_data, 'id') else module_id,
+                    'metadata': json.loads(module_data.metadata.dump()) if hasattr(module_data.metadata, 'dump') else {},
+                    'data': self._extract_module_data(module_data)
+                }
+            else:
+                print(f"Module {module_id} not found: {result.error()}")
+                return None
+        except Exception as e:
+            print(f"Error getting module data for {module_id}: {e}")
+            return None
+    
+    def get_audit_trail(self, module_id: str) -> List[Dict[str, Any]]:
+        """Get audit trail for a module"""
+        if not self.current_file:
+            raise RuntimeError("No file loaded. Call read_file() first.")
+        
+        try:
+            # Convert string module_id to UUID if needed
+            uuid_obj = umdf_reader.UUID(module_id) if isinstance(module_id, str) else module_id
+            result = self.reader.getAuditTrail(uuid_obj)
+            
+            if result.has_value():
+                trails = result.value()
+                audit_data = []
+                for trail in trails:
+                    trail_info = {
+                        'module_id': str(trail.moduleId) if hasattr(trail, 'moduleId') else '',
+                        'timestamp': str(trail.timestamp) if hasattr(trail, 'timestamp') else '',
+                        'action': str(trail.action) if hasattr(trail, 'action') else ''
+                    }
+                    audit_data.append(trail_info)
+                return audit_data
+            else:
+                print(f"Audit trail not found: {result.error()}")
+                return []
+        except Exception as e:
+            print(f"Error getting audit trail for {module_id}: {e}")
+            return []
+    
+    def close_file(self) -> bool:
+        """Close the currently open file"""
+        try:
+            result = self.reader.closeFile()
+            if result.success:
+                self.current_file = None
+                return True
+            else:
+                print(f"Failed to close file: {result.message}")
+                return False
+        except Exception as e:
+            print(f"Error closing file: {e}")
+            return False
+    
+    def _extract_module_data(self, module_data) -> Any:
+        """Extract data from ModuleData object based on its type"""
+        try:
+            # This is a simplified extraction - you might need to expand this
+            # based on your specific ModuleData structure
+            if hasattr(module_data, 'data'):
+                # Handle different data types (tabular, image, nested, etc.)
+                return "Data extracted"  # Placeholder
+            return None
+        except Exception as e:
+            print(f"Error extracting module data: {e}")
+            return None
+
+class UMDFWriter:
+    """High-level wrapper for writing UMDF files"""
+    
+    def __init__(self):
+        self.writer = umdf_reader.Writer()
+        self.current_file = None
+    
+    def create_new_file(self, filename: str, author: str, password: str = "") -> bool:
+        """Create a new UMDF file"""
+        try:
+            result = self.writer.createNewFile(filename, author, password)
+            if result.success:
+                self.current_file = filename
+                return True
+            else:
+                print(f"Failed to create file: {result.message}")
+                return False
+        except Exception as e:
+            print(f"Error creating file {filename}: {e}")
+            return False
+    
+    def create_new_encounter(self) -> Optional[str]:
+        """Create a new encounter and return its ID"""
+        if not self.current_file:
+            raise RuntimeError("No file open. Call create_new_file() first.")
+        
+        try:
+            result = self.writer.createNewEncounter()
+            if result.has_value():
+                encounter_id = result.value()
+                return str(encounter_id)
+            else:
+                print(f"Failed to create encounter: {result.error()}")
+                return None
+        except Exception as e:
+            print(f"Error creating encounter: {e}")
+            return None
+    
+    def add_module_to_encounter(self, encounter_id: str, schema_path: str, module_data: umdf_reader.ModuleData) -> Optional[str]:
+        """Add a module to an encounter"""
+        if not self.current_file:
+            raise RuntimeError("No file open. Call create_new_file() first.")
+        
+        try:
+            # Convert string encounter_id to UUID if needed
+            uuid_obj = umdf_reader.UUID(encounter_id) if isinstance(encounter_id, str) else encounter_id
+            result = self.writer.addModuleToEncounter(uuid_obj, schema_path, module_data)
+            
+            if result.has_value():
+                module_id = result.value()
+                return str(module_id)
+            else:
+                print(f"Failed to add module: {result.error()}")
+                return None
+        except Exception as e:
+            print(f"Error adding module to encounter: {e}")
+            return None
+    
+    def close_file(self) -> bool:
+        """Close and finalize the current file"""
+        try:
+            result = self.writer.closeFile()
+            if result.success:
+                self.current_file = None
+                return True
+            else:
+                print(f"Failed to close file: {result.message}")
+                return False
+        except Exception as e:
+            print(f"Error closing file: {e}")
             return False
 
-# Create a global instance
-umdf_interface = UMDFInterface() 
+# Convenience functions for backward compatibility
+def read_umdf_file(filepath: str, password: str = "") -> Dict[str, Any]:
+    """Read a UMDF file and return its information"""
+    reader = UMDFReader()
+    if reader.read_file(filepath, password):
+        file_info = reader.get_file_info()
+        reader.close_file()
+        return file_info
+    return {}
+
+def get_module_data(filepath: str, module_id: str, password: str = "") -> Optional[Dict[str, Any]]:
+    """Get data for a specific module from a UMDF file"""
+    reader = UMDFReader()
+    if reader.read_file(filepath, password):
+        module_data = reader.get_module_data(module_id)
+        reader.close_file()
+        return module_data
+    return None
+
+# Export the main classes
+__all__ = [
+    'UMDFReader', 'UMDFWriter', 'read_umdf_file', 'get_module_data',
+    'Reader', 'Writer', 'ModuleData', 'UUID', 'Result'
+]
+
+# Also export the raw C++ classes for advanced usage
+Reader = umdf_reader.Reader
+Writer = umdf_reader.Writer
+ModuleData = umdf_reader.ModuleData
+UUID = umdf_reader.UUID
+Result = umdf_reader.Result 

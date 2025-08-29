@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Form
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
@@ -9,7 +9,7 @@ from typing import List
 from .models.medical_file import MedicalFile, Module
 from .importers.umdf_importer import UMDFImporter
 from .schemas.schema_manager import SchemaManager
-from cpp_interface.umdf_interface import umdf_interface
+# Removed old import - now using UMDFReader directly in the importer
 
 app = FastAPI(title="Medical File Format UI", version="1.0.0")
 
@@ -24,9 +24,14 @@ umdf_importer = UMDFImporter()
 
 # API Routes first
 @app.post("/api/upload/umdf")
-async def upload_umdf_file(file: UploadFile = File(...)):
+async def upload_umdf_file(
+    file: UploadFile = File(...),
+    password: str = Form("")  # Accept password from form data
+):
     """Upload and process a UMDF file."""
     print("=== DEBUG: /api/upload/umdf route registered ===")
+    print(f"=== DEBUG: Password provided: {'Yes' if password else 'No'}")
+    
     try:
         if not file.filename.endswith('.umdf'):
             raise HTTPException(status_code=400, detail="Only .umdf files are supported")
@@ -34,62 +39,47 @@ async def upload_umdf_file(file: UploadFile = File(...)):
         # Read file content
         file_content = await file.read()
         
-        # Import the UMDF file
-        result = umdf_importer.import_file(file_content, file.filename)
+        # Import the UMDF file with password
+        result = umdf_importer.import_file(file_content, file.filename, password)
         
         return {
             "success": True,
             "file_name": file.filename,
             "file_size": len(file_content),
             "modules": result.get('modules', []),
-            "module_count": len(result.get('modules', []))
+            "module_count": result.get('module_count', 0),
+            "encounters": result.get('encounters', []),
+            "module_graph": result.get('module_graph', {})
         }
         
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-@app.post("/write/umdf")
-async def write_umdf_file(
-    modules: List[dict],
-    output_path: str,
-    access_mode: str = "fail_if_exists"
-):
-    """Write modules to a UMDF file using the C++ writer."""
+@app.get("/api/module/{module_id}/data")
+async def get_module_data(module_id: str):
+    """Get data for a specific module using the C++ reader."""
     try:
-        # Prepare data for C++ writer
-        data = {
-            "modules": modules,
-            "metadata": {
-                "created_by": "Medical File Format UI",
-                "version": "1.0.0"
+        print(f"=== DEBUG: Getting data for module: {module_id}")
+        
+        # Get the module data using the C++ reader
+        module_data = umdf_importer.reader.get_module_data(module_id)
+        
+        if module_data:
+            return {
+                "success": True,
+                "data": module_data
             }
-        }
-        
-        # Write using C++ interface
-        success = umdf_interface.write_file(data, output_path, access_mode)
-        
-        if success:
-            return {"success": True, "message": f"UMDF file written to {output_path}"}
         else:
-            return {"success": False, "message": "Failed to write UMDF file"}
+            return {
+                "success": False,
+                "error": f"Module {module_id} not found or no data available"
+            }
             
     except Exception as e:
-        return {"success": False, "message": str(e)}
+        print(f"=== DEBUG: Error getting module data: {e}")
+        return {"success": False, "error": str(e)}
 
-@app.get("/read/umdf/{file_path:path}")
-async def read_umdf_file(file_path: str):
-    """Read a UMDF file using the C++ reader."""
-    try:
-        # Read using C++ interface
-        data = umdf_interface.read_file(file_path)
-        
-        if data:
-            return {"success": True, "data": data}
-        else:
-            return {"success": False, "message": "Failed to read UMDF file"}
-            
-    except Exception as e:
-        return {"success": False, "message": str(e)}
+# Removed old write/read endpoints - now using UMDFReader directly in the importer
 
 @app.get("/api/schemas")
 async def get_schemas():

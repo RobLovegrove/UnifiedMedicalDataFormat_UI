@@ -11,24 +11,25 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 try:
-    from cpp_interface.umdf_interface import umdf_interface
+    from cpp_interface.umdf_interface import UMDFReader, read_umdf_file
     print("Successfully imported UMDF interface")
 except ImportError as e:
     print(f"Warning: Could not import UMDF interface: {e}")
-    umdf_interface = None
+    UMDFReader = None
+    read_umdf_file = None
 
 class UMDFImporter:
     """Importer for UMDF files using the C++ reader."""
     
     def __init__(self):
         """Initialize the UMDF importer."""
-        self.interface = umdf_interface
+        self.reader = UMDFReader() if UMDFReader else None
     
     def can_import(self) -> bool:
         """Check if UMDF import is available."""
-        return self.interface and self.interface.can_read()
+        return self.reader is not None
     
-    def import_file(self, file_content: bytes, filename: str) -> Dict[str, Any]:
+    def import_file(self, file_content: bytes, filename: str, password: str = "") -> Dict[str, Any]:
         """Import a UMDF file and convert to internal module format."""
         if not self.can_import():
             raise ImportError("UMDF reader module not available")
@@ -46,52 +47,92 @@ class UMDFImporter:
             print(f"Temporary file created: {temp_path}")
             print(f"File size: {len(file_content)} bytes")
             
-            # Read the file using the interface
-            print("Calling interface.read_file...")
-            file_data = self.interface.read_file(temp_path)
-            print(f"Interface read_file returned: {type(file_data)}")
+            # Basic file validation - check if it's not empty and has some content
+            if len(file_content) == 0:
+                raise RuntimeError("File is empty")
             
-            if not file_data:
-                print("Interface returned None or empty data")
-                raise RuntimeError(f"Failed to read UMDF file: {filename}")
+            # Check if file starts with expected UMDF header (if known)
+            # This is a basic check - you might need to adjust based on your file format
+            if len(file_content) < 4:
+                raise RuntimeError("File is too small to be a valid UMDF file")
             
-            print(f"File data received: {type(file_data)}")
-            if isinstance(file_data, dict):
-                print(f"Keys in file_data: {list(file_data.keys())}")
+            print(f"File validation passed - proceeding with UMDF reader")
+            
+            # Read the file using the UMDF reader
+            print("Opening UMDF file with reader...")
+            print(f"Temporary file path: {temp_path}")
+            print(f"Temporary file exists: {os.path.exists(temp_path)}")
+            print(f"Temporary file size: {os.path.getsize(temp_path) if os.path.exists(temp_path) else 'N/A'}")
+            
+            try:
+                # Open the file using the C++ reader
+                print("Opening UMDF file with reader.openFile...")
+                
+                # Use the password provided by the frontend
+                result = self.reader.reader.openFile(temp_path, password)
+                print(f"openFile result: {result}")
+                print(f"openFile success: {result.success}")
+                print(f"openFile message: {result.message}")
+                
+                if not result.success:
+                    print(f"Failed to open UMDF file: {result.message}")
+                    raise RuntimeError(f"Failed to open UMDF file: {result.message}")
+                    
+            except Exception as open_error:
+                print(f"Exception during openFile: {open_error}")
+                import traceback
+                traceback.print_exc()
+                raise RuntimeError(f"Exception during file open: {open_error}")
+            
+            # Get file information
+            print("Getting file info...")
+            file_info = self.reader.reader.getFileInfo()
+            print(f"File info received: {type(file_info)}")
+            print(f"File info content: {file_info}")
+            
+            # Close the file
+            self.reader.reader.closeFile()
+            
+            # Check if the file info indicates success
+            if not file_info or not file_info.get('success', False):
+                error_msg = file_info.get('error', 'Unknown error occurred') if file_info else 'No file info received'
+                print(f"File processing failed: {error_msg}")
+                raise RuntimeError(f"Failed to process UMDF file: {error_msg}")
+            
+            # Extract module information from the JSON response
+            module_count = file_info.get('module_count', 0)
+            modules_data = file_info.get('modules', [])
+            module_graph = file_info.get('module_graph', {})
+            encounters = module_graph.get('encounters', [])
+            
+            print(f"Successfully processed file with {module_count} modules and {len(encounters)} encounters")
             
             # Convert to internal format
             modules = []
             
-            # Extract modules from the file data
-            if 'modules' in file_data:
-                for module_data in file_data['modules']:
-                    try:
-                        module = {
-                            "id": module_data.get('id', 'unknown'),
-                            "name": module_data.get('name', f"UMDF_Module_{module_data.get('id', 'unknown')}"),
-                            "schema_id": module_data.get('schema_id', 'unknown'),
-                            "type": module_data.get('type', 'unknown'),
-                            "schema_url": module_data.get('schema_url', 'unknown'),
-                            "metadata": module_data.get('metadata', {}),
-                            "data": module_data.get('data', {}),
-                            "created_at": datetime.now().isoformat(),
-                            "source_file": filename
-                        }
-                        modules.append(module)
-                    except Exception as e:
-                        print(f"Warning: Failed to process module: {e}")
-                        continue
-                
-                print(f"Successfully processed {len(modules)} modules")
-            else:
-                print(f"No modules found in file_data. Available keys: {list(file_data.keys()) if isinstance(file_data, dict) else 'Not a dict'}")
+            # Create module entries from the modules array
+            for module_data in modules_data:
+                module = {
+                    "id": module_data.get('uuid', 'unknown'),
+                    "name": f"UMDF_Module_{module_data.get('type', 'unknown')}",
+                    "schema_id": "unknown",
+                    "type": module_data.get('type', 'unknown'),
+                    "schema_url": "unknown",
+                    "metadata": {"uuid": module_data.get('uuid', 'unknown')},
+                    "data": {},
+                    "created_at": datetime.now().isoformat(),
+                    "source_file": filename
+                }
+                modules.append(module)
             
             return {
                 "file_type": "umdf",
                 "file_path": filename,
                 "modules": modules,
-                "file_info": file_data,
-                "module_count": len(modules)
+                "file_info": file_info,
+                "module_count": module_count,
+                "encounters": encounters,
+                "module_graph": module_graph
             }
             
         except Exception as e:
@@ -117,105 +158,4 @@ class UMDFImporter:
         with open(file_path, 'rb') as f:
             file_content = f.read()
         
-        return self.import_file(file_content, os.path.basename(file_path))
-    
-
-    
-    def _extract_data_from_dict(self, module_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract the main data from module data dictionary."""
-        data = {}
-        
-        if isinstance(module_data, dict):
-            # Extract data from the module_data structure
-            if 'data' in module_data:
-                raw_data = module_data['data']
-                
-                # First, try to find pixel data in the nested structure
-                pixel_data = self._find_pixel_data_in_nested_structure(raw_data)
-                
-                if pixel_data:
-                    # Found pixel data - convert to image
-                    try:
-                        import numpy as np
-                        from PIL import Image
-                        import base64
-                        import io
-                        
-                        # Convert to numpy array
-                        pixel_array = np.array(pixel_data, dtype=np.uint8)
-                        
-                        # Try to determine dimensions from metadata
-                        rows = 512  # Default
-                        cols = 512  # Default
-                        
-                        if 'metadata' in module_data:
-                            metadata = module_data['metadata']
-                            if isinstance(metadata, list):
-                                for meta in metadata:
-                                    if isinstance(meta, dict):
-                                        if 'rows' in meta:
-                                            rows = meta['rows']
-                                        if 'columns' in meta:
-                                            cols = meta['columns']
-                            elif isinstance(metadata, dict):
-                                if 'rows' in metadata:
-                                    rows = metadata['rows']
-                                if 'columns' in metadata:
-                                    cols = metadata['columns']
-                        
-                        # Reshape if possible
-                        if len(pixel_array) == rows * cols:
-                            pixel_array = pixel_array.reshape((rows, cols))
-                        elif len(pixel_array) == rows * cols * 3:  # RGB
-                            pixel_array = pixel_array.reshape((rows, cols, 3))
-                        
-                        # Convert to PIL Image
-                        if len(pixel_array.shape) == 2:  # Grayscale
-                            img = Image.fromarray(pixel_array, mode='L')
-                        else:  # RGB
-                            img = Image.fromarray(pixel_array, mode='RGB')
-                        
-                        # Convert to PNG Base64
-                        buffer = io.BytesIO()
-                        img.save(buffer, format='PNG')
-                        img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-                        
-                        data = {
-                            "imageData": img_base64,
-                            "pixelData": pixel_data,  # Keep original for reference
-                            "dimensions": f"{rows}x{cols}",
-                            "format": "png"
-                        }
-                        
-                    except Exception as e:
-                        print(f"Warning: Failed to convert pixel data to image: {e}")
-                        data = {"pixelData": pixel_data}
-                else:
-                    # No pixel data found, return the original structure
-                    if isinstance(raw_data, list):
-                        data = {"items": raw_data}
-                    elif isinstance(raw_data, dict):
-                        data = raw_data
-                    else:
-                        data = {"value": raw_data}
-        
-        return data
-    
-    def _find_pixel_data_in_nested_structure(self, data: Any) -> Optional[List[int]]:
-        """Recursively search for pixel data in nested structures."""
-        if isinstance(data, list):
-            # Check if this list looks like pixel data
-            if len(data) > 1000 and all(isinstance(x, (int, float)) for x in data[:10]):
-                return data
-            # Search deeper in nested lists
-            for item in data:
-                result = self._find_pixel_data_in_nested_structure(item)
-                if result:
-                    return result
-        elif isinstance(data, dict):
-            # Search in dictionary values
-            for value in data.values():
-                result = self._find_pixel_data_in_nested_structure(value)
-                if result:
-                    return result
-        return None 
+        return self.import_file(file_content, os.path.basename(file_path)) 
