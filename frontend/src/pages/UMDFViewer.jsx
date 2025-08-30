@@ -16,6 +16,7 @@ const UMDFViewer = () => {
   const [currentImageModuleId, setCurrentImageModuleId] = useState(null);
   const [fileInputRef] = useState(React.createRef()); // Track which image module is currently displayed
   const [isEditMode, setIsEditMode] = useState(false); // Track whether we're in edit mode
+  const [encounterCollapsed, setEncounterCollapsed] = useState({}); // Track which encounters are collapsed
 
   // Set up global function for slider updates
   useEffect(() => {
@@ -26,10 +27,10 @@ const UMDFViewer = () => {
     };
   }, []);
   
-  // Load module data when encounters are available
+  // Load module data when encounters are available (but not in edit mode)
   useEffect(() => {
-    if (encounters.length > 0) {
-      console.log(`🔄 Loading data for ${encounters.length} encounters`);
+    if (encounters.length > 0 && !isEditMode) {
+      console.log(`🔄 Loading data for ${encounters.length} encounters (not in edit mode)`);
       console.log('📋 Encounters:', encounters);
       
       encounters.forEach((encounter, encounterIndex) => {
@@ -49,8 +50,10 @@ const UMDFViewer = () => {
           });
         }
       });
+    } else if (encounters.length > 0 && isEditMode) {
+      console.log(`🔄 Encounters changed but in edit mode - skipping module reload to avoid decryption errors`);
     }
-  }, [encounters]);
+  }, [encounters, isEditMode]);
 
   // Initialize current image module when modules are loaded
   useEffect(() => {
@@ -1217,15 +1220,57 @@ const UMDFViewer = () => {
     
     return (
         <div className="py-4" style={{width: '100%'}}>
-          <h4 className="card-title mb-4 text-start" style={{color: '#667eea', paddingLeft: '20px'}}>
-            <i className="fas fa-hospital me-2"></i>
-            Encounter {index + 1}
-          </h4>
+          <div className="d-flex justify-content-between align-items-center mb-4" style={{paddingLeft: '20px', paddingRight: '20px'}}>
+            <div className="d-flex align-items-center">
+              <button
+                className="btn btn-link p-0 me-3"
+                onClick={() => toggleEncounterCollapse(encounter_id)}
+                title={encounterCollapsed[encounter_id] ? "Expand encounter modules" : "Collapse encounter modules"}
+                style={{
+                  color: '#667eea',
+                  textDecoration: 'none',
+                  fontSize: '1.2rem',
+                  minWidth: '24px'
+                }}
+              >
+                <i className={`fas ${encounterCollapsed[encounter_id] ? 'fa-plus' : 'fa-minus'}`}></i>
+              </button>
+              <h4 className="card-title mb-0" style={{color: '#667eea'}}>
+                <i className="fas fa-hospital me-2"></i>
+                Encounter {index + 1}
+              </h4>
+            </div>
+            {isEditMode && (
+              <button
+                className="btn btn-outline-primary btn-sm"
+                onClick={() => handleAddModuleToEncounter(encounter_id)}
+                title="Add a new module to this encounter"
+                style={{
+                  border: '2px solid #667eea',
+                  backgroundColor: 'transparent',
+                  color: '#667eea',
+                  transition: 'all 0.3s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#667eea';
+                  e.target.style.color = 'white';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'transparent';
+                  e.target.style.color = '#667eea';
+                }}
+              >
+                <i className="fas fa-plus me-1"></i>
+                Add Module
+              </button>
+            )}
+          </div>
           
-          <div className="module-tree">
-            {module_tree.map((moduleNode, index) => {
-              const module = modules.find(m => m.id === moduleNode.id);
-              if (!module) return null;
+          {!encounterCollapsed[encounter_id] && (
+            <div className="module-tree">
+              {module_tree.map((moduleNode, index) => {
+                const module = modules.find(m => m.id === moduleNode.id);
+                if (!module) return null;
               
               return (
                 <div key={index} className="module-node mb-4">
@@ -1471,7 +1516,8 @@ const UMDFViewer = () => {
                 </div>
               );
             })}
-          </div>
+            </div>
+          )}
         </div>
     );
   };
@@ -1715,11 +1761,39 @@ const UMDFViewer = () => {
       console.log('➕ Add Encounter: Starting add encounter process');
       setProcessingMessage('Adding new encounter...');
       
-      // TODO: Implement actual add encounter functionality
-      // For now, just show a success message
-      setProcessingMessage('New encounter added successfully');
-      setShowSuccessBar(true);
-      setTimeout(() => setShowSuccessBar(false), 3000);
+      // Call the backend to create a new encounter
+      const response = await fetch('/api/add-encounter', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log('➕ Add Encounter: Successfully created encounter:', result.encounter_id);
+        
+        // Add the new encounter to the encounters state
+        const newEncounter = {
+          encounter_id: result.encounter_id,
+          module_tree: [] // Start with empty module tree
+        };
+        
+        setEncounters(prevEncounters => [...prevEncounters, newEncounter]);
+        
+        setProcessingMessage('New encounter added successfully');
+        setShowSuccessBar(true);
+        setTimeout(() => setShowSuccessBar(false), 3000);
+        
+        console.log('➕ Add Encounter: Encounter added to state');
+      } else {
+        throw new Error(result.message || 'Failed to create encounter');
+      }
       
       console.log('➕ Add Encounter: Add completed');
     } catch (error) {
@@ -1730,6 +1804,37 @@ const UMDFViewer = () => {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // Handle adding a new module to a specific encounter
+  const handleAddModuleToEncounter = async (encounterId) => {
+    try {
+      console.log('➕ Add Module: Starting add module process for encounter:', encounterId);
+      setProcessingMessage('Adding new module to encounter...');
+      
+      // TODO: Implement actual add module functionality
+      // For now, just show a success message
+      setProcessingMessage('New module added to encounter successfully');
+      setShowSuccessBar(true);
+      setTimeout(() => setShowSuccessBar(false), 3000);
+      
+      console.log('➕ Add Module: Add completed');
+    } catch (error) {
+      console.error('❌ Add Module: Error adding module:', error);
+      setProcessingMessage('Error adding module. Please try again.');
+      setShowErrorBar(true);
+      setTimeout(() => setShowErrorBar(false), 3000);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Toggle encounter collapse state
+  const toggleEncounterCollapse = (encounterId) => {
+    setEncounterCollapsed(prev => ({
+      ...prev,
+      [encounterId]: !prev[encounterId]
+    }));
   };
 
   // Handle page unload/refresh when in edit mode

@@ -101,24 +101,22 @@ async def edit_file(file_path: str = Form(...), password: str = Form("")):
         # For a local prototype, we'll use the file path constructed from the filename
         # and the known UMDF projects directory
         
-        # First, close the current reader
-        if hasattr(umdf_importer, 'reader') and umdf_importer.reader:
-            try:
-                result = umdf_importer.reader.reader.closeFile()
-                if not result.success:
-                    print(f"=== DEBUG: Failed to close reader: {result.message} ===")
-                    return {"success": False, "message": f"Failed to close reader: {result.message}"}
-            except Exception as close_error:
-                print(f"=== DEBUG: Error closing reader: {close_error} ===")
-                return {"success": False, "message": f"Error closing reader: {close_error}"}
+        # Keep the reader open for reading module data while in edit mode
+        # We'll open the writer alongside the reader
+        print("=== DEBUG: Keeping reader open for module data access ===")
         
         # Now open the file with the writer using the file path from frontend
         try:
             username = "current_user"  # This should come from frontend
             
             print(f"=== DEBUG: Opening file with writer: {file_path}, user: {username} ===")
+            print(f"=== DEBUG: Writer object before open: {umdf_writer}")
+            print(f"=== DEBUG: Writer current_file before open: {getattr(umdf_writer, 'current_file', 'NOT_SET')}")
             
             result = umdf_writer.open_file(file_path, username, password)
+            
+            print(f"=== DEBUG: open_file result: {result}")
+            print(f"=== DEBUG: Writer current_file after open: {getattr(umdf_writer, 'current_file', 'NOT_SET')}")
             
             if result:
                 print("=== DEBUG: File opened successfully with writer ===")
@@ -190,9 +188,18 @@ async def add_encounter():
     try:
         print("=== DEBUG: Adding new encounter ===")
         
+        # Debug: Check writer state
+        print(f"=== DEBUG: Writer object: {umdf_writer}")
+        print(f"=== DEBUG: Writer has current_file attribute: {hasattr(umdf_writer, 'current_file')}")
+        print(f"=== DEBUG: Writer current_file value: {getattr(umdf_writer, 'current_file', 'NOT_SET')}")
+        print(f"=== DEBUG: Writer object attributes: {dir(umdf_writer)}")
+        
         # Check if we're in edit mode (writer is open)
         if not hasattr(umdf_writer, 'current_file') or not umdf_writer.current_file:
+            print("=== DEBUG: Writer not in edit mode - current_file is not set")
             return {"success": False, "message": "Not in edit mode. Please enter edit mode first."}
+        
+        print("=== DEBUG: Writer is in edit mode, proceeding with encounter creation")
         
         # Call the writer's createNewEncounter method
         try:
@@ -233,41 +240,56 @@ async def get_schema(schema_id: str):
         return {"error": "Schema not found"}
 
 @app.get("/api/module/{module_id}/data")
-async def get_module_data(module_id: str):
+async def get_module_data(module_id: str, password: str = ""):
     """Get data for a specific module."""
     try:
         print(f"=== DEBUG: Getting data for module {module_id}")
         
-        # Call the C++ reader directly since we know the file is open
-        # Bypass the Python wrapper's state checking
-        try:
+        # Check if we're in edit mode (writer is open) or view mode (reader is open)
+        if hasattr(umdf_writer, 'current_file') and umdf_writer.current_file:
+            # We're in edit mode - use the writer's internal reader
+            print(f"=== DEBUG: In edit mode, using writer's internal reader for module: {module_id}")
+            try:
+                # The writer should have its own internal reader for accessing module data
+                # We need to check what methods are available on the writer
+                print(f"=== DEBUG: Writer object: {umdf_writer}")
+                print(f"=== DEBUG: Writer methods: {dir(umdf_writer.writer)}")
+                
+                # Try to get module data through the writer
+                if hasattr(umdf_writer.writer, 'getModuleData'):
+                    module_data = umdf_writer.writer.getModuleData(module_id)
+                    print(f"=== DEBUG: Got module data through writer: {type(module_data)}")
+                else:
+                    # Fallback: try to reopen the file with the reader temporarily
+                    print(f"=== DEBUG: Writer doesn't have getModuleData, reopening with reader temporarily")
+                    # Store current writer state
+                    current_writer_file = umdf_writer.current_file
+                    
+                    # Temporarily reopen with reader
+                    temp_result = umdf_importer.import_file_from_path(current_writer_file, "")
+                    if temp_result:
+                        module_data = umdf_importer.reader.reader.getModuleData(module_id)
+                        print(f"=== DEBUG: Got module data through temporary reader: {type(module_data)}")
+                    else:
+                        raise Exception("Failed to temporarily reopen file with reader")
+                        
+            except Exception as writer_error:
+                print(f"=== DEBUG: Error getting module data through writer: {writer_error}")
+                # Fallback to the original reader approach
+                if hasattr(umdf_importer, 'reader') and umdf_importer.reader:
+                    module_data = umdf_importer.reader.reader.getModuleData(module_id)
+                    print(f"=== DEBUG: Fallback to reader: {type(module_data)}")
+                else:
+                    raise writer_error
+        else:
+            # We're in view mode - use the regular reader
+            print(f"=== DEBUG: In view mode, using regular reader for module: {module_id}")
+            if not hasattr(umdf_importer, 'reader') or not umdf_importer.reader:
+                raise Exception("No reader available")
+            
             module_data = umdf_importer.reader.reader.getModuleData(module_id)
             print(f"=== DEBUG: Module data type: {type(module_data)}")
             print(f"=== DEBUG: Module data: {module_data}")
-        except Exception as module_error:
-            error_msg = str(module_error)
-            print(f"=== DEBUG: Error calling getModuleData: {error_msg}")
-            
-            # Check if this is a decryption failure (incorrect password)
-            if "AES-256-GCM decryption failed" in error_msg:
-                print("=== DEBUG: Detected decryption failure - likely incorrect password")
-                return {
-                    "success": False,
-                    "error": "decryption_failed",
-                    "message": "Module decryption failed. The password may be incorrect.",
-                    "metadata": {"error": "Decryption failed - check password"},
-                    "data": {"error": "Decryption failed - check password"}
-                }
-            else:
-                # Other type of error
-                print(f"=== DEBUG: Other type of error: {error_msg}")
-                return {
-                    "success": False,
-                    "error": "module_access_failed",
-                    "message": f"Failed to access module: {error_msg}",
-                    "metadata": {"error": f"Module access failed: {error_msg}"},
-                    "data": {"error": f"Module access failed: {error_msg}"}
-                }
         
         # Check if we have ExpectedModuleData wrapper
         if hasattr(module_data, 'has_value') and module_data.has_value():
