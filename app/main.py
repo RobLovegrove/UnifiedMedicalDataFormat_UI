@@ -9,6 +9,7 @@ from typing import List
 from .models.medical_file import MedicalFile, Module
 from .importers.umdf_importer import UMDFImporter
 from .schemas.schema_manager import SchemaManager
+from cpp_interface.umdf_interface import UMDFWriter
 # Removed old import - now using UMDFReader directly in the importer
 
 app = FastAPI(title="Medical File Format UI", version="1.0.0")
@@ -21,6 +22,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Initialize managers
 schema_manager = SchemaManager()
 umdf_importer = UMDFImporter()
+umdf_writer = UMDFWriter()
 
 # API Routes first
 @app.post("/api/upload/umdf")
@@ -72,6 +74,9 @@ async def close_file():
                 result = umdf_importer.reader.reader.closeFile()
                 if result.success:
                     print("=== DEBUG: File closed successfully ===")
+                    
+
+                    
                     return {"success": True, "message": "File closed successfully"}
                 else:
                     print(f"=== DEBUG: Failed to close file: {result.message} ===")
@@ -85,6 +90,131 @@ async def close_file():
             
     except Exception as e:
         print(f"=== DEBUG: Unexpected error in close_file: {e} ===")
+        return {"success": False, "message": f"Unexpected error: {e}"}
+
+@app.post("/api/edit")
+async def edit_file(file_path: str = Form(...), password: str = Form("")):
+    """Switch from reader mode to writer mode for the current file."""
+    try:
+        print(f"=== DEBUG: Switching to edit mode for file: {file_path} ===")
+        
+        # For a local prototype, we'll use the file path constructed from the filename
+        # and the known UMDF projects directory
+        
+        # First, close the current reader
+        if hasattr(umdf_importer, 'reader') and umdf_importer.reader:
+            try:
+                result = umdf_importer.reader.reader.closeFile()
+                if not result.success:
+                    print(f"=== DEBUG: Failed to close reader: {result.message} ===")
+                    return {"success": False, "message": f"Failed to close reader: {result.message}"}
+            except Exception as close_error:
+                print(f"=== DEBUG: Error closing reader: {close_error} ===")
+                return {"success": False, "message": f"Error closing reader: {close_error}"}
+        
+        # Now open the file with the writer using the file path from frontend
+        try:
+            username = "current_user"  # This should come from frontend
+            
+            print(f"=== DEBUG: Opening file with writer: {file_path}, user: {username} ===")
+            
+            result = umdf_writer.open_file(file_path, username, password)
+            
+            if result:
+                print("=== DEBUG: File opened successfully with writer ===")
+                return {"success": True, "message": "File opened in edit mode"}
+            else:
+                print("=== DEBUG: Failed to open file with writer ===")
+                return {"success": False, "message": "Failed to open file with writer"}
+                
+        except Exception as writer_error:
+            print(f"=== DEBUG: Error opening file with writer: {writer_error} ===")
+            return {"success": False, "message": f"Error opening file with writer: {writer_error}"}
+            
+    except Exception as e:
+        print(f"=== DEBUG: Unexpected error in edit_file: {e} ===")
+        return {"success": False, "message": f"Unexpected error: {e}"}
+
+@app.post("/api/cancel-edit")
+async def cancel_edit(password: str = Form("")):
+    """Cancel edit mode and close the writer, then reopen with reader."""
+    try:
+        print("=== DEBUG: Canceling edit mode ===")
+        
+        # Get the current file path from the writer before closing it
+        current_file = getattr(umdf_writer, 'current_file', None)
+        print(f"=== DEBUG: Current file in writer: {current_file}")
+        
+        # Call the writer's cancel and close method
+        try:
+            result = umdf_writer.cancel_and_close()
+            if result:
+                print("=== DEBUG: Successfully canceled edit mode and closed writer ===")
+                
+                # Now reopen the file with the reader
+                if current_file:
+                    print(f"=== DEBUG: Reopening file with reader: {current_file}")
+                    try:
+                        # Use the password from the frontend
+                        print(f"=== DEBUG: Using password for reopening: {'Yes' if password else 'No'}")
+                        
+                        # Import the file again to reopen with reader
+                        result = umdf_importer.import_file_from_path(current_file, password)
+                        if result:
+                            print("=== DEBUG: Successfully reopened file with reader ===")
+                            return {"success": True, "message": "Edit mode canceled and file reopened for viewing"}
+                        else:
+                            print("=== DEBUG: Failed to reopen file with reader ===")
+                            return {"success": True, "message": "Edit mode canceled, but failed to reopen file for viewing"}
+                    except Exception as reopen_error:
+                        print(f"=== DEBUG: Error reopening file with reader: {reopen_error} ===")
+                        return {"success": True, "message": "Edit mode canceled, but failed to reopen file for viewing"}
+                else:
+                    print("=== DEBUG: No current file to reopen ===")
+                    return {"success": True, "message": "Edit mode canceled successfully"}
+            else:
+                print("=== DEBUG: Failed to cancel edit mode ===")
+                return {"success": False, "message": "Failed to cancel edit mode"}
+                
+        except Exception as cancel_error:
+            print(f"=== DEBUG: Error canceling edit mode: {cancel_error} ===")
+            return {"success": False, "message": f"Error canceling edit mode: {cancel_error}"}
+            
+    except Exception as e:
+        print(f"=== DEBUG: Unexpected error in cancel_edit: {e} ===")
+        return {"success": False, "message": f"Unexpected error: {e}"}
+
+@app.post("/api/add-encounter")
+async def add_encounter():
+    """Add a new encounter using the writer."""
+    try:
+        print("=== DEBUG: Adding new encounter ===")
+        
+        # Check if we're in edit mode (writer is open)
+        if not hasattr(umdf_writer, 'current_file') or not umdf_writer.current_file:
+            return {"success": False, "message": "Not in edit mode. Please enter edit mode first."}
+        
+        # Call the writer's createNewEncounter method
+        try:
+            encounter_id = umdf_writer.create_new_encounter()
+            
+            if encounter_id:
+                print(f"=== DEBUG: Successfully created new encounter: {encounter_id} ===")
+                return {
+                    "success": True, 
+                    "message": "New encounter created successfully",
+                    "encounter_id": encounter_id
+                }
+            else:
+                print("=== DEBUG: Failed to create new encounter ===")
+                return {"success": False, "message": "Failed to create new encounter"}
+                
+        except Exception as encounter_error:
+            print(f"=== DEBUG: Error creating encounter: {encounter_error} ===")
+            return {"success": False, "message": f"Error creating encounter: {encounter_error}"}
+            
+    except Exception as e:
+        print(f"=== DEBUG: Unexpected error in add_encounter: {e} ===")
         return {"success": False, "message": f"Unexpected error: {e}"}
 
 @app.get("/api/schemas")

@@ -11,6 +11,68 @@ const HomePage = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
+  // Check if File System Access API is available
+  const isFileSystemAccessSupported = 'showOpenFilePicker' in window;
+
+  // Get file with path using File System Access API if available
+  const getFileWithPath = async () => {
+    if (!isFileSystemAccessSupported) {
+      return null; // Fall back to regular file input
+    }
+
+    try {
+      const [fileHandle] = await window.showOpenFilePicker({
+        types: [
+          {
+            description: 'UMDF Files',
+            accept: {
+              'application/octet-stream': ['.umdf'],
+              'application/x-umdf': ['.umdf']
+            }
+          }
+        ],
+        multiple: false
+      });
+
+      const file = await fileHandle.getFile();
+      
+      // Debug: see what methods are available on fileHandle
+      console.log('🔍 FileHandle methods:', Object.getOwnPropertyNames(fileHandle));
+      console.log('🔍 FileHandle prototype methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(fileHandle)));
+      
+      // Explore all possible ways to get the file path
+      console.log('🔍 FileHandle object:', fileHandle);
+      console.log('🔍 FileHandle properties:', Object.getOwnPropertyNames(fileHandle));
+      console.log('🔍 FileHandle descriptor:', Object.getOwnPropertyDescriptor(fileHandle, 'path'));
+      console.log('🔍 FileHandle prototype chain:', Object.getPrototypeOf(fileHandle));
+      
+      // Since File System Access API can't give us the full path, construct it
+      // For local prototype: assume files are in the UMDF projects directory
+      let filePath;
+      try {
+        // Get the current working directory or use a known path
+        // For now, let's use a hardcoded path to your UMDF projects directory
+        const umdfProjectsDir = '/Users/rob/Documents/CS/Dissertation/UMDF'; // Adjust this path as needed
+        
+        // Construct the full file path
+        filePath = `${umdfProjectsDir}/${file.name}`;
+        console.log('🔍 Constructed file path:', filePath);
+        console.log('🔍 Using UMDF projects directory:', umdfProjectsDir);
+        
+      } catch (pathError) {
+        console.log('Could not construct file path, using filename:', pathError);
+        filePath = file.name;
+      }
+      
+      console.log('📁 File selected with path:', filePath);
+      
+      return { file, filePath };
+    } catch (error) {
+      console.log('File System Access API not available or user cancelled:', error);
+      return null;
+    }
+  };
+
   // Check if user has already logged in
   useEffect(() => {
     const storedUsername = sessionStorage.getItem('umdf_username');
@@ -30,7 +92,7 @@ const HomePage = () => {
     }
   };
 
-  const handleFileSelect = () => {
+  const handleFileSelect = async () => {
     // Check if user is logged in
     const storedUsername = sessionStorage.getItem('umdf_username');
     const storedPassword = sessionStorage.getItem('umdf_password');
@@ -40,8 +102,67 @@ const HomePage = () => {
       return;
     }
     
-    // Trigger the hidden file input
+    // Try to use File System Access API first
+    if (isFileSystemAccessSupported) {
+      console.log('🔍 File System Access API is supported, attempting to use it...');
+      try {
+        const result = await getFileWithPath();
+        if (result) {
+          console.log('✅ File System Access API succeeded:', result);
+          const { file, filePath } = result;
+          handleFileWithPath(file, filePath);
+          return;
+        } else {
+          console.log('❌ File System Access API returned no result');
+        }
+      } catch (error) {
+        console.error('❌ File System Access API failed:', error);
+      }
+    } else {
+      console.log('❌ File System Access API not supported');
+    }
+    
+    console.log('🔄 Falling back to regular file input...');
+    // Fall back to regular file input
     fileInputRef.current.click();
+  };
+
+  const handleFileWithPath = (file, filePath) => {
+    setSelectedFile(file);
+    
+    if (file.name.toLowerCase().endsWith('.umdf')) {
+      // For UMDF files, redirect to viewer with file data
+      const fileData = {
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        lastModified: file.lastModified
+      };
+      
+      // Store file info in sessionStorage for the viewer
+      sessionStorage.setItem('umdf_file_name', file.name);
+      sessionStorage.setItem('umdf_file_size', file.size.toString());
+      sessionStorage.setItem('umdf_file_last_modified', file.lastModified.toString());
+      
+      // Store the file path for editing
+      sessionStorage.setItem('umdf_file_path', filePath);
+      console.log('📁 Stored file path for editing:', filePath);
+      
+      // Store the actual file object for processing
+      // Convert file to base64 for storage (sessionStorage can't store File objects directly)
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64Data = reader.result;
+        sessionStorage.setItem('umdf_file_data', base64Data);
+        sessionStorage.setItem('umdf_file_ready', 'true');
+        // Navigate to viewer after file is loaded
+        navigate('/umdf-viewer');
+      };
+      reader.readAsDataURL(file);
+    } else {
+      // For non-UMDF files, show file info on this page
+      setShowFileInfo(true);
+    }
   };
 
   const handleFileChange = (event) => {
@@ -62,6 +183,10 @@ const HomePage = () => {
         sessionStorage.setItem('umdf_file_name', file.name);
         sessionStorage.setItem('umdf_file_size', file.size.toString());
         sessionStorage.setItem('umdf_file_last_modified', file.lastModified.toString());
+        
+        // Store the filename as fallback for editing (regular file input can't get full path)
+        sessionStorage.setItem('umdf_file_path', file.name);
+        console.log('📁 Stored filename as fallback for editing:', file.name);
         
         // Store the actual file object for processing
         // Convert file to base64 for storage (sessionStorage can't store File objects directly)

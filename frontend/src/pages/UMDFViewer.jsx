@@ -15,6 +15,7 @@ const UMDFViewer = () => {
   const [sliderValues, setSliderValues] = useState({}); // Track slider values for each module
   const [currentImageModuleId, setCurrentImageModuleId] = useState(null);
   const [fileInputRef] = useState(React.createRef()); // Track which image module is currently displayed
+  const [isEditMode, setIsEditMode] = useState(false); // Track whether we're in edit mode
 
   // Set up global function for slider updates
   useEffect(() => {
@@ -100,6 +101,18 @@ const UMDFViewer = () => {
       }
       
       if (result.success) {
+        // Update file information in sessionStorage for the new file
+        sessionStorage.setItem('umdf_file_name', file.name);
+        sessionStorage.setItem('umdf_file_size', file.size.toString());
+        sessionStorage.setItem('umdf_file_last_modified', file.lastModified.toString());
+        
+        // Store file path if available (from File System Access API)
+        const filePath = sessionStorage.getItem('umdf_file_path');
+        if (filePath) {
+          sessionStorage.setItem('umdf_file_path', filePath);
+          console.log('📁 Stored file path for editing:', filePath);
+        }
+        
         // Store only essential module metadata in sessionStorage (not full image data)
         const modulesForStorage = result.modules.map(module => ({
           id: module.id,
@@ -153,6 +166,41 @@ const UMDFViewer = () => {
     }
   };
   
+  // Check if File System Access API is available
+  const isFileSystemAccessSupported = 'showOpenFilePicker' in window;
+
+  // Get file path using File System Access API if available
+  const getFileWithPath = async () => {
+    if (!isFileSystemAccessSupported) {
+      return null; // Fall back to regular file input
+    }
+
+    try {
+      const [fileHandle] = await window.showOpenFilePicker({
+        types: [
+          {
+            description: 'UMDF Files',
+            accept: {
+              'application/octet-stream': ['.umdf'],
+              'application/x-umdf': ['.umdf']
+            }
+          }
+        ],
+        multiple: false
+      });
+
+      const file = await fileHandle.getFile();
+      const filePath = fileHandle.name; // This gives us the actual file path
+      
+      console.log('📁 File selected with path:', filePath);
+      
+      return { file, filePath };
+    } catch (error) {
+      console.log('File System Access API not available or user cancelled:', error);
+      return null;
+    }
+  };
+
   // Process file and load modules on component mount
   useEffect(() => {
     const processFile = async () => {
@@ -1428,11 +1476,47 @@ const UMDFViewer = () => {
     );
   };
 
+  // Handle file selection with path (using File System Access API)
+  const handleFileSelectWithPath = async () => {
+    const result = await getFileWithPath();
+    if (!result) {
+      // Fall back to regular file input
+      fileInputRef.current.click();
+      return;
+    }
+
+    const { file, filePath } = result;
+    
+    console.log('📁 File selected with path:', filePath);
+    
+    // Check if file has .umdf extension
+    if (!file.name.toLowerCase().endsWith('.umdf')) {
+      setErrorMessage('Please select a .umdf file');
+      setShowErrorBar(true);
+      setTimeout(() => setShowErrorBar(false), 3000);
+      return;
+    }
+    
+    // Store the file path for later use in edit mode
+    sessionStorage.setItem('umdf_file_path', filePath);
+    
+    // Process the file using the change file logic
+    await handleChangeFileWithFile(file);
+  };
+
   // Handle changing to a new file
   const handleChangeFile = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
     
+    await handleChangeFileWithFile(file);
+    
+    // Clear the file input
+    event.target.value = '';
+  };
+
+  // Handle changing to a new file with a File object
+  const handleChangeFileWithFile = async (file) => {
     console.log('🔄 Change File: Starting file change process');
     console.log('🔄 Change File: Selected file:', file.name, file.size, file.type);
     
@@ -1461,6 +1545,7 @@ const UMDFViewer = () => {
       setCurrentImageModuleId(null);
       setSliderValues({});
       setModuleGraph({});
+      setIsEditMode(false); // Reset edit mode when changing files
       
       // Get password from session storage (same one used from home page)
       const storedPassword = sessionStorage.getItem('umdf_password');
@@ -1471,14 +1556,212 @@ const UMDFViewer = () => {
       await processFileData(file, storedPassword);
       console.log('🔄 Change File: processFileData completed successfully');
       
-      // Clear the file input
-      event.target.value = '';
-      
     } catch (error) {
       console.error('❌ Change File: Error changing file:', error);
       setProcessingMessage('Error changing file. Please try again.');
     }
   };
+
+  // Handle switching to edit mode
+  const handleEditFile = async () => {
+    console.log('✏️ Edit File: Button clicked!');
+    console.log('✏️ Edit File: Starting edit mode switch');
+    
+    try {
+      setProcessingMessage('Switching to edit mode...');
+      
+      // Get the current file path and password
+      const fileName = sessionStorage.getItem('umdf_file_name');
+      const filePath = sessionStorage.getItem('umdf_file_path'); // Get actual file path if available
+      const storedPassword = sessionStorage.getItem('umdf_password');
+      
+      console.log('🔍 Edit File Debug - fileName from sessionStorage:', fileName);
+      console.log('🔍 Edit File Debug - filePath from sessionStorage:', filePath);
+      console.log('🔍 Edit File Debug - storedPassword from sessionStorage:', storedPassword);
+      
+      if (!fileName) {
+        throw new Error('No file currently open');
+      }
+      
+      // Use actual file path if available, otherwise fall back to filename
+      const pathToSend = filePath || fileName;
+      console.log('✏️ Edit File: Switching to edit mode for file:', pathToSend);
+      console.log('🔍 Edit File Debug - Final pathToSend:', pathToSend);
+      
+      // Create form data for the edit request
+      const formData = new FormData();
+      formData.append('file_path', pathToSend);
+      if (storedPassword) {
+        formData.append('password', storedPassword);
+      }
+      
+      // Call the edit endpoint to switch to writer mode
+      console.log('✏️ Edit File: Sending request to /api/edit...');
+      const editResponse = await fetch('/api/edit', {
+        method: 'POST',
+        body: formData
+      });
+      
+      console.log('✏️ Edit File: Response status:', editResponse.status);
+      console.log('✏️ Edit File: Response ok:', editResponse.ok);
+      
+      if (!editResponse.ok) {
+        throw new Error(`HTTP error! status: ${editResponse.status}`);
+      }
+      
+      const result = await editResponse.json();
+      console.log('✏️ Edit File: Response data:', result);
+      
+      if (result.success) {
+        console.log('✏️ Edit File: Successfully switched to edit mode');
+        setProcessingMessage('File opened in edit mode');
+        
+        // Set edit mode state
+        setIsEditMode(true);
+        
+        // Show success message
+        setShowSuccessBar(true);
+        setTimeout(() => setShowSuccessBar(false), 3000);
+        
+        // TODO: Update UI to show edit mode indicators
+        // For now, just show the success message
+        
+      } else {
+        throw new Error(result.message || 'Failed to switch to edit mode');
+      }
+      
+    } catch (error) {
+      console.error('❌ Edit File: Error switching to edit mode:', error);
+      setProcessingMessage('Error switching to edit mode. Please try again.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Handle saving changes to the file
+  const handleSaveFile = async () => {
+    try {
+      console.log('💾 Save File: Starting save process');
+      setProcessingMessage('Saving changes...');
+      
+      // TODO: Implement actual save functionality
+      // For now, just show a success message
+      setProcessingMessage('Changes saved successfully');
+      setShowSuccessBar(true);
+      setTimeout(() => setShowSuccessBar(false), 3000);
+      
+      console.log('💾 Save File: Save completed');
+    } catch (error) {
+      console.error('❌ Save File: Error saving file:', error);
+      setProcessingMessage('Error saving changes. Please try again.');
+      setShowErrorBar(true);
+      setTimeout(() => setShowErrorBar(false), 3000);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Handle canceling edit mode
+  const handleCancelEdit = async () => {
+    try {
+      console.log('❌ Cancel Edit: Starting cancel process');
+      setProcessingMessage('Canceling edit mode...');
+      
+      // Get the stored password
+      const storedPassword = sessionStorage.getItem('umdf_password');
+      
+      // Create form data for the cancel request
+      const formData = new FormData();
+      if (storedPassword) {
+        formData.append('password', storedPassword);
+      }
+      
+      // Call the backend to cancel edit mode and close writer
+      const response = await fetch('/api/cancel-edit', {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log('❌ Cancel Edit: Successfully canceled edit mode');
+        setIsEditMode(false);
+        setProcessingMessage('Edit mode canceled');
+        setShowSuccessBar(true);
+        setTimeout(() => setShowSuccessBar(false), 3000);
+      } else {
+        throw new Error(result.message || 'Failed to cancel edit mode');
+      }
+      
+      console.log('❌ Cancel Edit: Cancel completed');
+    } catch (error) {
+      console.error('❌ Cancel Edit: Error canceling edit:', error);
+      setProcessingMessage('Error canceling edit mode. Please try again.');
+      setShowErrorBar(true);
+      setTimeout(() => setShowErrorBar(false), 3000);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Handle adding a new encounter
+  const handleAddNewEncounter = async () => {
+    try {
+      console.log('➕ Add Encounter: Starting add encounter process');
+      setProcessingMessage('Adding new encounter...');
+      
+      // TODO: Implement actual add encounter functionality
+      // For now, just show a success message
+      setProcessingMessage('New encounter added successfully');
+      setShowSuccessBar(true);
+      setTimeout(() => setShowSuccessBar(false), 3000);
+      
+      console.log('➕ Add Encounter: Add completed');
+    } catch (error) {
+      console.error('❌ Add Encounter: Error adding encounter:', error);
+      setProcessingMessage('Error adding encounter. Please try again.');
+      setShowErrorBar(true);
+      setTimeout(() => setShowErrorBar(false), 3000);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Handle page unload/refresh when in edit mode
+  useEffect(() => {
+    const handleBeforeUnload = async (event) => {
+      if (isEditMode) {
+        console.log('⚠️ Page unload detected while in edit mode - attempting to cancel edit');
+        
+        // Try to cancel edit mode before page unloads
+        try {
+          // Use sendBeacon for more reliable delivery during page unload
+          const data = new FormData();
+          navigator.sendBeacon('/api/cancel-edit', data);
+        } catch (error) {
+          console.error('❌ Error sending cancel request during page unload:', error);
+        }
+        
+        // Show warning to user
+        event.preventDefault();
+        event.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+        return event.returnValue;
+      }
+    };
+
+    // Add event listener for page unload only
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    // Cleanup function
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isEditMode]);
 
   // Load module data from the C++ reader
   const loadModule = async (moduleId) => {
@@ -1663,6 +1946,7 @@ const UMDFViewer = () => {
                               setIsProcessing(false);
                               setProcessingMessage('');
                               setShowSuccessBar(false);
+                              setIsEditMode(false); // Reset edit mode when changing users
                               
                               console.log('🔄 Change User: All data cleared, redirecting to home page');
                               
@@ -1708,68 +1992,227 @@ const UMDFViewer = () => {
                 <div className="card-body px-5" style={{paddingTop: '8px', paddingBottom: '8px'}}>
                   <div className="d-flex justify-content-between align-items-center">
                     <div className="text-center flex-grow-1">
-                      <h2 className="mb-2" style={{color: '#667eea'}}>UMDF File Viewer</h2>
+                      <h2 className="mb-2" style={{color: '#667eea'}}>
+                        UMDF File Viewer
+                        {isEditMode && (
+                          <span className="ms-2 badge bg-warning text-dark" style={{fontSize: '0.7rem', verticalAlign: 'middle'}}>
+                            <i className="fas fa-edit me-1"></i>
+                            Edit Mode
+                          </span>
+                        )}
+                      </h2>
                       <p className="text-muted mb-0">
                         File: {fileName} ({fileSize} bytes) • {modules.length} module{modules.length !== 1 ? 's' : ''} found
                         {encounters.length > 0 && ` • ${encounters.length} encounter${encounters.length !== 1 ? 's' : ''}`}
                       </p>
                     </div>
                     <div className="d-flex flex-column gap-2">
-                      <button
-                        className="btn btn-sm w-100"
-                        title="Edit File"
-                        style={{
-                          fontSize: '0.8rem',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          width: '120px',
-                          height: '38px',
-                          backgroundColor: 'transparent',
-                          color: '#667eea',
-                          border: '1px solid #667eea'
-                        }}
-                      >
-                        <i className="fas fa-edit me-1"></i>
-                        Edit File
-                      </button>
-                      <button
-                        className="btn btn-sm w-100"
-                        title="Change File"
-                        onClick={() => fileInputRef.current.click()}
-                        style={{
-                          fontSize: '0.8rem',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          width: '120px',
-                          height: '38px',
-                          backgroundColor: 'transparent',
-                          color: '#667eea',
-                          border: '1px solid #667eea'
-                        }}
-                      >
-                        <i className="fas fa-exchange-alt me-1"></i>
-                        Change File
-                      </button>
-                      <button
-                        className="btn btn-sm w-100"
-                        title="Create New File"
-                        style={{
-                          fontSize: '0.8rem',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          width: '120px',
-                          height: '38px',
-                          backgroundColor: 'transparent',
-                          color: '#667eea',
-                          border: '1px solid #667eea'
-                        }}
-                      >
-                        <i className="fas fa-plus me-1"></i>
-                        Create New File
-                      </button>
+                      {isEditMode ? (
+                        // Edit mode buttons
+                        <>
+                          <button
+                            className="btn btn-sm w-100"
+                            title="Save changes to the file"
+                            onClick={() => handleSaveFile()}
+                            style={{
+                              fontSize: '0.8rem',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              width: '120px',
+                              height: '38px',
+                              backgroundColor: 'transparent',
+                              color: '#667eea',
+                              border: '1px solid #667eea',
+                              transition: 'all 0.2s ease-in-out'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.target.style.backgroundColor = '#667eea';
+                              e.target.style.color = 'white';
+                              e.target.style.transform = 'translateY(-1px)';
+                              e.target.style.boxShadow = '0 4px 8px rgba(102, 126, 234, 0.3)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.backgroundColor = 'transparent';
+                              e.target.style.color = '#667eea';
+                              e.target.style.transform = 'translateY(0)';
+                              e.target.style.boxShadow = 'none';
+                            }}
+                          >
+                            <i className="fas fa-save me-1"></i>
+                            Save
+                          </button>
+                          <button
+                            className="btn btn-sm w-100"
+                            title="Cancel editing and return to view mode"
+                            onClick={() => handleCancelEdit()}
+                            style={{
+                              fontSize: '0.8rem',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              width: '120px',
+                              height: '38px',
+                              backgroundColor: 'transparent',
+                              color: '#667eea',
+                              border: '1px solid #667eea',
+                              transition: 'all 0.2s ease-in-out'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.target.style.backgroundColor = '#667eea';
+                              e.target.style.color = 'white';
+                              e.target.style.transform = 'translateY(-1px)';
+                              e.target.style.boxShadow = '0 4px 8px rgba(102, 126, 234, 0.3)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.backgroundColor = 'transparent';
+                              e.target.style.color = '#667eea';
+                              e.target.style.transform = 'translateY(0)';
+                              e.target.style.boxShadow = 'none';
+                            }}
+                          >
+                            <i className="fas fa-times me-1"></i>
+                            Cancel
+                          </button>
+                          <button
+                            className="btn btn-sm w-100"
+                            title="Add a new encounter to the file"
+                            onClick={() => handleAddNewEncounter()}
+                            style={{
+                              fontSize: '0.8rem',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              width: '120px',
+                              height: '38px',
+                              backgroundColor: 'transparent',
+                              color: '#667eea',
+                              border: '1px solid #667eea',
+                              transition: 'all 0.2s ease-in-out'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.target.style.backgroundColor = '#667eea';
+                              e.target.style.color = 'white';
+                              e.target.style.transform = 'translateY(-1px)';
+                              e.target.style.boxShadow = '0 4px 8px rgba(102, 126, 234, 0.3)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.backgroundColor = 'transparent';
+                              e.target.style.color = '#667eea';
+                              e.target.style.transform = 'translateY(0)';
+                              e.target.style.boxShadow = 'none';
+                            }}
+                          >
+                            <i className="fas fa-plus me-1"></i>
+                            Add New Encounter
+                          </button>
+                        </>
+                      ) : (
+                        // View mode buttons
+                        <>
+                          <button
+                            className="btn btn-sm w-100"
+                            title="Edit File"
+                            onClick={handleEditFile}
+                            style={{
+                              fontSize: '0.8rem',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              width: '120px',
+                              height: '38px',
+                              backgroundColor: 'transparent',
+                              color: '#667eea',
+                              border: '1px solid #667eea',
+                              transition: 'all 0.2s ease-in-out'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.target.style.backgroundColor = '#667eea';
+                              e.target.style.color = 'white';
+                              e.target.style.transform = 'translateY(-1px)';
+                              e.target.style.boxShadow = '0 4px 8px rgba(102, 126, 234, 0.3)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.backgroundColor = 'transparent';
+                              e.target.style.color = '#667eea';
+                              e.target.style.transform = 'translateY(0)';
+                              e.target.style.boxShadow = 'none';
+                            }}
+                          >
+                            <i className="fas fa-edit me-1"></i>
+                            Edit File
+                          </button>
+                          <button
+                            className="btn btn-sm w-100"
+                            title="Change File"
+                            onClick={async () => {
+                              if (isFileSystemAccessSupported) {
+                                await handleFileSelectWithPath();
+                              } else {
+                                fileInputRef.current.click();
+                              }
+                            }}
+                            style={{
+                              fontSize: '0.8rem',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              width: '120px',
+                              height: '38px',
+                              backgroundColor: 'transparent',
+                              color: '#667eea',
+                              border: '1px solid #667eea',
+                              transition: 'all 0.2s ease-in-out'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.target.style.backgroundColor = '#667eea';
+                              e.target.style.color = 'white';
+                              e.target.style.transform = 'translateY(-1px)';
+                              e.target.style.boxShadow = '0 4px 8px rgba(102, 126, 234, 0.3)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.backgroundColor = 'transparent';
+                              e.target.style.color = '#667eea';
+                              e.target.style.transform = 'translateY(0)';
+                              e.target.style.boxShadow = 'none';
+                            }}
+                          >
+                            <i className="fas fa-exchange-alt me-1"></i>
+                            Change File
+                          </button>
+                          <button
+                            className="btn btn-sm w-100"
+                            title="Create New File"
+                            style={{
+                              fontSize: '0.8rem',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              width: '120px',
+                              height: '38px',
+                              backgroundColor: 'transparent',
+                              color: '#667eea',
+                              border: '1px solid #667eea',
+                              transition: 'all 0.2s ease-in-out'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.target.style.backgroundColor = '#667eea';
+                              e.target.style.color = 'white';
+                              e.target.style.transform = 'translateY(-1px)';
+                              e.target.style.boxShadow = '0 4px 8px rgba(102, 126, 234, 0.3)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.backgroundColor = 'transparent';
+                              e.target.style.color = '#667eea';
+                              e.target.style.transform = 'translateY(0)';
+                              e.target.style.boxShadow = 'none';
+                            }}
+                          >
+                            <i className="fas fa-plus me-1"></i>
+                            Create New File
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>

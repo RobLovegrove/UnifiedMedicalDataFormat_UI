@@ -72,12 +72,15 @@ class UMDFImporter:
         """Check if UMDF import is available."""
         return self.reader is not None
     
+
+    
     def import_file(self, file_content: bytes, filename: str, password: str = "") -> Dict[str, Any]:
         """Import a UMDF file and convert to internal module format."""
         if not self.can_import():
             raise ImportError("UMDF reader module not available")
         
         temp_file = None
+        temp_path = None
         try:
             # Create temporary file with .umdf extension
             temp_file = tempfile.NamedTemporaryFile(mode='wb', suffix='.umdf', delete=False)
@@ -241,7 +244,7 @@ class UMDFImporter:
                 except Exception as cleanup_error:
                     print(f"Warning: Failed to clean up temporary file {temp_path}: {cleanup_error}")
     
-    def import_file_from_path(self, file_path: str) -> Dict[str, Any]:
+    def import_file_from_path(self, file_path: str, password: str = "") -> Dict[str, Any]:
         """Import a UMDF file from a file path."""
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
@@ -249,7 +252,7 @@ class UMDFImporter:
         with open(file_path, 'rb') as f:
             file_content = f.read()
         
-        return self.import_file(file_content, os.path.basename(file_path))
+        return self.import_file(file_content, os.path.basename(file_path), password)
     
     def close_file(self):
         """Close the currently open file when done with it."""

@@ -136,6 +136,21 @@ class UMDFWriter:
         self.writer = umdf_reader.Writer()
         self.current_file = None
     
+    def open_file(self, filename: str, author: str, password: str = "") -> bool:
+        """Open an existing UMDF file for editing"""
+        try:
+            result = self.writer.openFile(filename, author, password)
+            
+            if result.success:
+                self.current_file = filename
+                return True
+            else:
+                print(f"Failed to open file: {result.message}")
+                return False
+        except Exception as e:
+            print(f"Error opening file {filename}: {e}")
+            return False
+    
     def create_new_file(self, filename: str, author: str, password: str = "") -> bool:
         """Create a new UMDF file"""
         try:
@@ -187,6 +202,41 @@ class UMDFWriter:
             print(f"Error adding module to encounter: {e}")
             return None
     
+    def cancel_then_close(self) -> bool:
+        """Cancel the current operation and close the file without saving changes"""
+        try:
+            # Debug: check what methods are available on the writer
+            print(f"=== DEBUG: Available methods on writer: {dir(self.writer)}")
+            print(f"=== DEBUG: Writer type: {type(self.writer)}")
+            
+            # Try different possible method names
+            if hasattr(self.writer, 'cancelThenClose'):
+                result = self.writer.cancelThenClose()
+            elif hasattr(self.writer, 'cancelTheClose'):
+                result = self.writer.cancelTheClose()
+            elif hasattr(self.writer, 'cancelAndClose'):
+                result = self.writer.cancelAndClose()
+            elif hasattr(self.writer, 'cancel'):
+                result = self.writer.cancel()
+            else:
+                print("=== DEBUG: No cancel method found on writer")
+                # Just close the file without canceling
+                return self.close_file()
+            
+            if result.success:
+                self.current_file = None
+                return True
+            else:
+                print(f"Failed to cancel and close file: {result.message}")
+                return False
+        except Exception as e:
+            print(f"Error canceling and closing file: {e}")
+            return False
+    
+    def cancel_and_close(self) -> bool:
+        """Alias for cancel_then_close() to match backend expectations"""
+        return self.cancel_then_close()
+
     def close_file(self) -> bool:
         """Close and finalize the current file"""
         try:
@@ -200,6 +250,8 @@ class UMDFWriter:
         except Exception as e:
             print(f"Error closing file: {e}")
             return False
+    
+
 
 # Convenience functions for backward compatibility
 def read_umdf_file(filepath: str, password: str = "") -> Dict[str, Any]:
