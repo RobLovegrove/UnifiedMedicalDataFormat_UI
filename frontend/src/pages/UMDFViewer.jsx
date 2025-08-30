@@ -13,7 +13,8 @@ const UMDFViewer = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMessage, setProcessingMessage] = useState('');
   const [sliderValues, setSliderValues] = useState({}); // Track slider values for each module
-  const [currentImageModuleId, setCurrentImageModuleId] = useState(null); // Track which image module is currently displayed
+  const [currentImageModuleId, setCurrentImageModuleId] = useState(null);
+  const [fileInputRef] = useState(React.createRef()); // Track which image module is currently displayed
 
   // Set up global function for slider updates
   useEffect(() => {
@@ -60,6 +61,97 @@ const UMDFViewer = () => {
       }
     }
   }, [modules, currentImageModuleId]);
+  
+  // Extract file processing logic into a reusable function
+  const processFileData = async (file, password = null) => {
+    // Clear any old module metadata when processing a new file
+    sessionStorage.removeItem('umdf_modules_metadata');
+    
+    setIsProcessing(true);
+    setProcessingMessage('Processing UMDF file...');
+    
+    try {
+      // Create FormData for upload
+      const formData = new FormData();
+      formData.append('file', file, file.name || 'uploaded_file');
+      
+      // Add password if provided
+      if (password) {
+        formData.append('password', password);
+      }
+      
+      // Send to backend for C++ processing
+      const response = await fetch('/api/upload/umdf', {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
+      // Debug: Log what we received from the backend
+      console.log('🔍 DEBUG: Backend response:', result);
+      console.log('🔍 DEBUG: Modules received:', result.modules);
+      if (result.modules && result.modules.length > 0) {
+        console.log('🔍 DEBUG: First module schema_path:', result.modules[0].schema_path);
+      }
+      
+      if (result.success) {
+        // Store only essential module metadata in sessionStorage (not full image data)
+        const modulesForStorage = result.modules.map(module => ({
+          id: module.id,
+          name: module.name,
+          schema_id: module.schema_id,
+          schema_path: module.schema_path,
+          type: module.type,
+          schema_url: module.schema_url,
+          metadata: module.metadata,
+          version: module.version,
+          created: module.created,
+          dimensions: module.dimensions,
+          has_data: !!module.data,
+          data_summary: module.data ? `Data with ${Object.keys(module.data).length} fields` : 'No data',
+          has_pixel_data: !!module.pixel_data,
+          pixel_data_summary: module.pixel_data ? `Pixel data available (${module.dimensions?.join('x') || 'unknown dimensions'})` : 'No pixel data'
+        }));
+        
+        try {
+          sessionStorage.setItem('umdf_modules_metadata', JSON.stringify(modulesForStorage));
+          console.log('Stored module metadata in sessionStorage');
+        } catch (storageError) {
+          console.warn('Could not store module metadata in sessionStorage:', storageError);
+        }
+        
+        // Debug: Log what modules we're setting in state
+        console.log('🔍 DEBUG: Setting modules in state:', result.modules);
+        result.modules.forEach((module, index) => {
+          console.log(`  Module ${index}: id=${module.id}, name="${module.name}", type=${module.type}`);
+        });
+        
+        // Set full modules, encounters, and module graph in component state
+        setModules(result.modules);
+        setEncounters(result.encounters || []);
+        setModuleGraph(result.module_graph || {});
+        setShowSuccessBar(true);
+        
+        // Clear processing state
+        setIsProcessing(false);
+        setProcessingMessage('');
+        
+        // Auto-hide success bar after 3 seconds
+        setTimeout(() => setShowSuccessBar(false), 3000);
+      } else {
+        throw new Error(result.error || 'Failed to process file');
+      }
+    } catch (error) {
+      console.error('Error processing file:', error);
+      setProcessingMessage('Error processing file. Please try again.');
+      setIsProcessing(false);
+    }
+  };
   
   // Process file and load modules on component mount
   useEffect(() => {
@@ -533,6 +625,8 @@ const UMDFViewer = () => {
                   }
                 }
                 
+                // Error handling is now done at the module level, so we can proceed with normal image rendering
+                
                 if (!imageData || !Array.isArray(imageData) || imageData.length === 0) {
                   console.log('No image data available for module:', currentModule.id);
                   console.log('imageData:', imageData);
@@ -934,8 +1028,37 @@ const UMDFViewer = () => {
           console.log('🔍 DEBUG: currentModule.data:', currentModule.data);
           console.log('🔍 DEBUG: currentModule.data.frame_data:', currentModule.data?.frame_data);
           console.log('🔍 DEBUG: Should show frame metadata:', !!(currentModule.data && currentModule.data.frame_data));
+          
+          // Check for error states first
+          if (currentModule.data && currentModule.data.error) {
+            return true; // Show error display
+          }
+          
           return currentModule.data && currentModule.data.frame_data;
         })() && (
+          // Check if we should show error or actual frame metadata
+          currentModule.data && currentModule.data.error ? (
+            <div className="mt-3">
+              <h6 className="text-danger">
+                <i className="fas fa-exclamation-triangle me-2"></i>
+                Frame Metadata Error
+              </h6>
+              <div className="bg-danger bg-opacity-10 border border-danger p-3 rounded">
+                <div className="text-danger">
+                  <strong>Error Type:</strong> {currentModule.data.error}
+                </div>
+                <div className="text-danger mt-1">
+                  <strong>Message:</strong> {currentModule.data.message}
+                </div>
+                {currentModule.data.error === 'decryption_failed' && (
+                  <div className="mt-2">
+                    <i className="fas fa-lock me-1"></i>
+                    <small>This usually means the password is incorrect. Please check your login credentials.</small>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
           <div className="mt-3">
             <h6 className="text-purple-600">
               <i className="fas fa-layer-group me-2"></i>
@@ -1033,6 +1156,7 @@ const UMDFViewer = () => {
               })()}
             </div>
           </div>
+        )
         )}
         </div>
       </div>
@@ -1134,102 +1258,166 @@ const UMDFViewer = () => {
                         </div>
                       )}
                       
-                      {/* Module Metadata Display */}
                       {(() => {
-                        // For image modules, show metadata of the currently selected image module
-                        // For other modules, show the original module metadata
+                        // For image modules, check metadata of the currently selected image module
+                        // For other modules, check the original module metadata
                         const metadataToShow = module.type === 'image' && currentImageModuleId ? 
                           modules.find(m => m.id === currentImageModuleId)?.metadata : 
                           module.metadata;
                         
-                        if (!metadataToShow) return null;
+                        const hasMetadataError = metadataToShow && metadataToShow.error;
+                        const hasDataError = module.data && module.data.error;
                         
-                        return (
-                          <div className="mt-3">
-                            <h6 className="text-primary">
-                              <i className="fas fa-info-circle me-2"></i>
-                              Module Metadata
-                              {module.type === 'image' && currentImageModuleId && currentImageModuleId !== module.id && (
-                                <span className="text-muted ms-2">
-                                  (Showing: {modules.find(m => m.id === currentImageModuleId)?.name || currentImageModuleId})
-                                </span>
-                              )}
-                            </h6>
-                            <div className="bg-light p-3 rounded">
-                              {Array.isArray(metadataToShow) ? (
-                                // If metadata is directly an array, display each record
-                                metadataToShow.map((meta, index) => (
-                                  <div key={index} className="mb-2">
-                                    <strong>Record {index + 1}:</strong>
-                                    <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
-                                      {JSON.stringify(meta, null, 2)}
-                                    </pre>
-                                  </div>
-                                ))
-                              ) : metadataToShow.content && Array.isArray(metadataToShow.content) ? (
-                                // If metadata has a content array, display just the content
-                                metadataToShow.content.map((meta, index) => (
-                                  <div key={index} className="mb-2">
-                                    <strong>Record {index + 1}:</strong>
-                                    <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
-                                      {JSON.stringify(meta, null, 2)}
-                                    </pre>
-                                  </div>
-                                ))
-                              ) : metadataToShow && typeof metadataToShow === 'object' && !Array.isArray(metadataToShow) ? (
-                                // If metadata is a single object (like image metadata), display it directly
-                                <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
-                                  {JSON.stringify(metadataToShow, null, 2)}
-                                </pre>
-                              ) : (
-                                // Fallback: display the metadata object
-                                <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
-                                  {JSON.stringify(metadataToShow, null, 2)}
-                                </pre>
-                              )}
+                        // If there are any errors, show unified error block and skip all other displays
+                        if (hasMetadataError || hasDataError) {
+                          return (
+                            <div className="mt-3">
+                              <h6 className="text-danger">
+                                <i className="fas fa-exclamation-triangle me-2"></i>
+                                Module Error
+                              </h6>
+                              <div className="bg-danger bg-opacity-10 border border-danger p-3 rounded">
+                                {(() => {
+                                  if (hasMetadataError) {
+                                    return (
+                                      <div>
+                                        <div className="text-danger">
+                                          <strong>Error Type:</strong> {metadataToShow.error}
+                                        </div>
+                                        <div className="text-danger mt-1">
+                                          <strong>Message:</strong> {metadataToShow.message || 'No message available'}
+                                        </div>
+                                        {metadataToShow.error === 'decryption_failed' && (
+                                          <div className="mt-2">
+                                            <i className="fas fa-lock me-1"></i>
+                                            <small>This usually means the password is incorrect. Please check your login credentials.</small>
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  } else if (hasDataError) {
+                                    return (
+                                      <div>
+                                        <div className="text-danger">
+                                          <strong>Error Type:</strong> {module.data.error}
+                                        </div>
+                                        <div className="text-danger mt-1">
+                                          <strong>Message:</strong> {module.data.message || 'No message available'}
+                                        </div>
+                                        {module.data.error === 'decryption_failed' && (
+                                          <div className="mt-2">
+                                            <i className="fas fa-lock me-1"></i>
+                                            <small>This usually means the password is incorrect. Please check your login credentials.</small>
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  }
+                                  return null;
+                                })()}
+                              </div>
                             </div>
-                          </div>
+                          );
+                        }
+                        
+                        // If no errors, show normal module content
+                        return (
+                          <>
+                            {/* Module Metadata Display */}
+                            {(() => {
+                              if (!metadataToShow) return null;
+                              
+                              return (
+                                <div className="mt-3">
+                                  <h6 className="text-primary">
+                                    <i className="fas fa-info-circle me-2"></i>
+                                    Module Metadata
+                                    {module.type === 'image' && currentImageModuleId && currentImageModuleId !== module.id && (
+                                      <span className="text-muted ms-2">
+                                        (Showing: {modules.find(m => m.id === currentImageModuleId)?.name || currentImageModuleId})
+                                      </span>
+                                    )}
+                                  </h6>
+                                  <div className="bg-light p-3 rounded">
+                                    {Array.isArray(metadataToShow) ? (
+                                      // If metadata is directly an array, display each record
+                                      metadataToShow.map((meta, index) => (
+                                        <div key={index} className="mb-2">
+                                          <strong>Record {index + 1}:</strong>
+                                          <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
+                                            {JSON.stringify(meta, null, 2)}
+                                          </pre>
+                                        </div>
+                                      ))
+                                    ) : metadataToShow.content && Array.isArray(metadataToShow.content) ? (
+                                      // If metadata has a content array, display just the content
+                                      metadataToShow.content.map((meta, index) => (
+                                        <div key={index} className="mb-2">
+                                          <strong>Record {index + 1}:</strong>
+                                          <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
+                                            {JSON.stringify(meta, null, 2)}
+                                          </pre>
+                                        </div>
+                                      ))
+                                    ) : metadataToShow && typeof metadataToShow === 'object' && !Array.isArray(metadataToShow) ? (
+                                      // If metadata is a single object (like image metadata), display it directly
+                                      <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflowY: 'auto'}}>
+                                        {JSON.stringify(metadataToShow, null, 2)}
+                                      </pre>
+                                    ) : (
+                                      // Fallback: display the metadata object
+                                      <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflowY: 'auto'}}>
+                                        {JSON.stringify(metadataToShow, null, 2)}
+                                      </pre>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })()}
+
+                            {/* Module Data Display */}
+                            {module.type === 'image' && renderImagingModule(module, moduleNode)}
+                            
+                            {/* Show actual data if no errors */}
+                            {module.type !== 'image' && module.data && !module.data.error && Object.keys(module.data).length > 0 && (
+                              <div className="mt-3">
+                                <h6 className="text-success">
+                                  <i className="fas fa-database me-2"></i>
+                                  Module Data
+                                </h6>
+                                <div className="bg-light p-3 rounded">
+                                  {module.data.type === 'tabular' && module.data.data ? (
+                                    // For tabular data, show just the actual records
+                                    module.data.data.map((record, index) => (
+                                      <div key={index} className="mb-3">
+                                        <strong className="text-primary">Record {index + 1}:</strong>
+                                        <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
+                                          {JSON.stringify(record, null, 2)}
+                                        </pre>
+                                      </div>
+                                    ))
+                                  ) : (
+                                    // For other data types, show the full data object
+                                    <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '200px', overflowY: 'auto'}}>
+                                      {JSON.stringify(module.data, null, 2)}
+                                    </pre>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            
+                            {/* Show message if no data available and no errors */}
+                            {module.type !== 'image' && (!module.data || Object.keys(module.data).length === 0) && !module.data?.error && (
+                              <div className="mt-3 text-center">
+                                <div className="text-muted">
+                                  <i className="fas fa-info-circle me-2"></i>
+                                  Module data not yet loaded from file
+                                </div>
+                              </div>
+                            )}
+                          </>
                         );
                       })()}
-
-                      {/* Module Data Display */}
-                      {module.type === 'image' && renderImagingModule(module, moduleNode)}
-                      {module.type !== 'image' && module.data && Object.keys(module.data).length > 0 && (
-                        <div className="mt-3">
-                          <h6 className="text-success">
-                            <i className="fas fa-database me-2"></i>
-                            Module Data
-                          </h6>
-                          <div className="bg-light p-3 rounded">
-                            {module.data.type === 'tabular' && module.data.data ? (
-                              // For tabular data, show just the actual records
-                              module.data.data.map((record, index) => (
-                                <div key={index} className="mb-3">
-                                  <strong className="text-primary">Record {index + 1}:</strong>
-                                  <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '150px', overflow: 'auto'}}>
-                                    {JSON.stringify(record, null, 2)}
-                                  </pre>
-                                </div>
-                              ))
-                            ) : (
-                              // For other data types, show the full data object
-                              <pre className="mt-1 mb-0" style={{fontSize: '0.875rem', maxHeight: '200px', overflowY: 'auto'}}>
-                                {JSON.stringify(module.data, null, 2)}
-                              </pre>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      
-                      {/* Show message if no data available */}
-                      {module.type !== 'image' && (!module.data || Object.keys(module.data).length === 0) && (
-                        <div className="mt-3 text-center">
-                          <div className="text-muted">
-                            <i className="fas fa-info-circle me-2"></i>
-                            Module data not yet loaded from file
-                          </div>
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -1238,6 +1426,58 @@ const UMDFViewer = () => {
           </div>
         </div>
     );
+  };
+
+  // Handle changing to a new file
+  const handleChangeFile = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    console.log('🔄 Change File: Starting file change process');
+    console.log('🔄 Change File: Selected file:', file.name, file.size, file.type);
+    
+    try {
+      setProcessingMessage('Closing current file and loading new file...');
+      
+      // First, close the current file in the backend
+      console.log('🔄 Change File: Closing current file in backend...');
+      const closeResponse = await fetch('/api/close', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (!closeResponse.ok) {
+        console.warn('Warning: Could not close previous file:', closeResponse.status);
+      } else {
+        console.log('🔄 Change File: Successfully closed current file');
+      }
+      
+      // Reset state for new file
+      console.log('🔄 Change File: Resetting frontend state...');
+      setModules([]);
+      setEncounters([]);
+      setCurrentImageModuleId(null);
+      setSliderValues({});
+      setModuleGraph({});
+      
+      // Get password from session storage (same one used from home page)
+      const storedPassword = sessionStorage.getItem('umdf_password');
+      console.log('🔄 Change File: Retrieved password from sessionStorage:', storedPassword ? 'Password found' : 'No password');
+      
+      // Now process the new file using the reusable function
+      console.log('🔄 Change File: Calling processFileData with file:', file.name);
+      await processFileData(file, storedPassword);
+      console.log('🔄 Change File: processFileData completed successfully');
+      
+      // Clear the file input
+      event.target.value = '';
+      
+    } catch (error) {
+      console.error('❌ Change File: Error changing file:', error);
+      setProcessingMessage('Error changing file. Please try again.');
+    }
   };
 
   // Load module data from the C++ reader
@@ -1276,10 +1516,87 @@ const UMDFViewer = () => {
         );
         console.log(`🎉 Successfully loaded data for module: ${moduleId}`);
       } else {
-        console.error(`❌ Failed to load module data: ${result.error}`);
+        // Handle different types of errors from the backend
+        console.error(`❌ Failed to load module data:`, result);
+        
+        if (result.error === 'decryption_failed') {
+          // This is a password issue - show a user-friendly error
+          console.error(`🔐 Decryption failed - password may be incorrect`);
+          
+          // Update the module with error information
+          setModules(prevModules => 
+            prevModules.map(module => 
+              module.id === moduleId 
+                ? { 
+                    ...module, 
+                    data: { error: 'decryption_failed', message: result.message },
+                    metadata: { error: 'decryption_failed', message: result.message }
+                  }
+                : module
+            )
+          );
+          
+          // Show error message to user
+          setErrorMessage('Module decryption failed. The password may be incorrect. Please check your login credentials.');
+          setShowErrorBar(true);
+          
+        } else if (result.error === 'module_access_failed') {
+          // Other module access error
+          console.error(`🚫 Module access failed: ${result.message}`);
+          
+          setModules(prevModules => 
+            prevModules.map(module => 
+              module.id === moduleId 
+                ? { 
+                    ...module, 
+                    data: { error: 'module_access_failed', message: result.message },
+                    metadata: { error: 'module_access_failed', message: result.message }
+                  }
+                : module
+            )
+          );
+          
+          setErrorMessage(`Failed to access module: ${result.message}`);
+          setShowErrorBar(true);
+          
+        } else {
+          // Generic error
+          console.error(`❓ Unknown error type: ${result.error}`);
+          
+          setModules(prevModules => 
+            prevModules.map(module => 
+              module.id === moduleId 
+                ? { 
+                    ...module, 
+                    data: { error: 'unknown', message: result.message || 'Unknown error occurred' },
+                    metadata: { error: 'unknown', message: result.message || 'Unknown error occurred' }
+                  }
+                : module
+            )
+          );
+          
+          setErrorMessage(result.message || 'An unknown error occurred while loading module data');
+          setShowErrorBar(true);
+        }
       }
     } catch (error) {
       console.error(`💥 Error loading module data for ${moduleId}:`, error);
+      
+      // Update the module with error information for network/other errors
+      setModules(prevModules => 
+        prevModules.map(module => 
+          module.id === moduleId 
+            ? { 
+                ...module, 
+                data: { error: 'network_error', message: error.message },
+                metadata: { error: 'network_error', message: error.message }
+              }
+            : module
+        )
+      );
+      
+      setErrorMessage(`Network error: ${error.message}`);
+      setShowErrorBar(true);
     }
   };
 
@@ -1290,24 +1607,106 @@ const UMDFViewer = () => {
       <div className="header-section">
         <div className="container-fluid px-4">
           <div className="row">
-            <div className="col-12 text-center py-4">
-              <h1 className="header-logo mb-0">
-                <i className="fas fa-heartbeat me-3"></i>
-                Medical File Format
-              </h1>
+            <div className="col-12 py-4">
+              <div className="d-flex justify-content-between align-items-center">
+                <div className="text-center flex-grow-1">
+                  <h1 className="header-logo mb-0">
+                    <i className="fas fa-heartbeat me-3"></i>
+                    Medical File Format
+                  </h1>
+                </div>
+                <div className="user-info-container">
+                  {sessionStorage.getItem('umdf_username') && (
+                    <div className="user-info-card">
+                      <div className="d-flex align-items-center gap-2">
+                        <small className="text-muted">
+                          <i className="fas fa-user me-1"></i>
+                          Logged in as: <strong>{sessionStorage.getItem('umdf_username')}</strong>
+                        </small>
+                        <button
+                          className="btn btn-outline-secondary btn-sm"
+                          onClick={async () => {
+                            try {
+                              console.log('🔄 Change User: Starting user change process');
+                              
+                              // First, close the current file in the backend to clear any cached data
+                              console.log('🔄 Change User: Closing current file in backend...');
+                              const closeResponse = await fetch('/api/close', {
+                                method: 'POST',
+                                headers: {
+                                  'Content-Type': 'application/json',
+                                }
+                              });
+                              
+                              if (closeResponse.ok) {
+                                console.log('🔄 Change User: Successfully closed file in backend');
+                              } else {
+                                console.warn('🔄 Change User: Warning - could not close file in backend:', closeResponse.status);
+                              }
+                              
+                              // Clear ALL session storage data
+                              console.log('🔄 Change User: Clearing all session storage...');
+                              sessionStorage.removeItem('umdf_username');
+                              sessionStorage.removeItem('umdf_password');
+                              sessionStorage.removeItem('umdf_modules_metadata');
+                              sessionStorage.removeItem('umdf_file_ready');
+                              sessionStorage.removeItem('umdf_file_data');
+                              sessionStorage.removeItem('umdf_file_name');
+                              
+                              // Clear all component state
+                              console.log('🔄 Change User: Clearing component state...');
+                              setModules([]);
+                              setEncounters([]);
+                              setCurrentImageModuleId(null);
+                              setSliderValues({});
+                              setModuleGraph({});
+                              setIsProcessing(false);
+                              setProcessingMessage('');
+                              setShowSuccessBar(false);
+                              
+                              console.log('🔄 Change User: All data cleared, redirecting to home page');
+                              
+                              // Redirect to home page for new login
+                              window.location.href = '/';
+                              
+                            } catch (error) {
+                              console.error('❌ Change User: Error during user change:', error);
+                              // Even if there's an error, clear everything and redirect
+                              sessionStorage.clear(); // Nuclear option - clear everything
+                              window.location.href = '/';
+                            }
+                          }}
+                        >
+                          <i className="fas fa-sign-out-alt me-1"></i>
+                          Change User
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
       
       <div className="main-content">
+        {/* Hidden file input for changing files */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          style={{ display: 'none' }}
+          accept=".umdf,.dcm,.dicom,.jpg,.jpeg,.png,.tiff,.bmp,.fhir,.json"
+          onChange={handleChangeFile}
+        />
+        
         <div className="container-fluid px-4">
           <div className="row">
             <div className="col-12">
               {/* Title Card */}
               <div className="card mb-4" style={{maxWidth: '90vw', margin: '0 auto'}}>
-                <div className="card-body px-5 py-3">
-                  <div className="d-flex justify-content-between align-items-start">
+                <div className="card-body px-5" style={{paddingTop: '8px', paddingBottom: '8px'}}>
+                  <div className="d-flex justify-content-between align-items-center">
                     <div className="text-center flex-grow-1">
                       <h2 className="mb-2" style={{color: '#667eea'}}>UMDF File Viewer</h2>
                       <p className="text-muted mb-0">
@@ -1315,47 +1714,61 @@ const UMDFViewer = () => {
                         {encounters.length > 0 && ` • ${encounters.length} encounter${encounters.length !== 1 ? 's' : ''}`}
                       </p>
                     </div>
-                    <div className="d-flex gap-2">
+                    <div className="d-flex flex-column gap-2">
                       <button
-                        className="btn btn-sm"
-                        title="Import File"
+                        className="btn btn-sm w-100"
+                        title="Edit File"
                         style={{
-                          border: 'none', 
-                          padding: '0.5rem',
-                          backgroundColor: 'white',
-                          color: '#6c757d'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.target.style.color = '#667eea';
-                          e.target.querySelector('i').style.color = '#667eea';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.target.style.color = '#6c757d';
-                          e.target.querySelector('i').style.color = '#6c757d';
+                          fontSize: '0.8rem',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          width: '120px',
+                          height: '38px',
+                          backgroundColor: 'transparent',
+                          color: '#667eea',
+                          border: '1px solid #667eea'
                         }}
                       >
-                        <i className="fas fa-file-import fa-lg" style={{color: '#6c757d'}}></i>
+                        <i className="fas fa-edit me-1"></i>
+                        Edit File
                       </button>
                       <button
-                        className="btn btn-sm"
-                        title="Clear Cache"
-                        onClick={clearCache}
+                        className="btn btn-sm w-100"
+                        title="Change File"
+                        onClick={() => fileInputRef.current.click()}
                         style={{
-                          border: 'none', 
-                          padding: '0.5rem',
-                          backgroundColor: 'white',
-                          color: '#6c757d'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.target.style.color = '#dc3545';
-                          e.target.querySelector('i').style.color = '#dc3545';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.target.style.color = '#6c757d';
-                          e.target.querySelector('i').style.color = '#6c757d';
+                          fontSize: '0.8rem',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          width: '120px',
+                          height: '38px',
+                          backgroundColor: 'transparent',
+                          color: '#667eea',
+                          border: '1px solid #667eea'
                         }}
                       >
-                        <i className="fas fa-trash fa-lg" style={{color: '#6c757d'}}></i>
+                        <i className="fas fa-exchange-alt me-1"></i>
+                        Change File
+                      </button>
+                      <button
+                        className="btn btn-sm w-100"
+                        title="Create New File"
+                        style={{
+                          fontSize: '0.8rem',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          width: '120px',
+                          height: '38px',
+                          backgroundColor: 'transparent',
+                          color: '#667eea',
+                          border: '1px solid #667eea'
+                        }}
+                      >
+                        <i className="fas fa-plus me-1"></i>
+                        Create New File
                       </button>
                     </div>
                   </div>
@@ -1401,8 +1814,58 @@ const UMDFViewer = () => {
                         </div>
                       </div>
 
-                      {/* Module Metadata Display */}
-                      {module.metadata && Array.isArray(module.metadata) && module.metadata.length > 0 && (
+                      {/* Check for any errors in metadata or data first */}
+                      {(module.metadata && module.metadata.error) || (module.data && module.data.error) ? (
+                        <div className="mt-3">
+                          <h6 className="text-danger">
+                            <i className="fas fa-exclamation-triangle me-2"></i>
+                            Module Error
+                          </h6>
+                          <div className="bg-danger bg-opacity-10 border border-danger p-3 rounded">
+                            {(() => {
+                              if (module.metadata && module.metadata.error) {
+                                return (
+                                  <div>
+                                    <div className="text-danger">
+                                      <strong>Error Type:</strong> {module.metadata.error}
+                                    </div>
+                                    <div className="text-danger mt-1">
+                                      <strong>Message:</strong> {module.metadata.message || 'No message available'}
+                                    </div>
+                                    {module.metadata.error === 'decryption_failed' && (
+                                      <div className="mt-2">
+                                        <i className="fas fa-lock me-1"></i>
+                                        <small>This usually means the password is incorrect. Please check your login credentials.</small>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              } else if (module.data && module.data.error) {
+                                return (
+                                  <div>
+                                    <div className="text-danger">
+                                      <strong>Error Type:</strong> {module.data.error}
+                                    </div>
+                                    <div className="text-danger mt-1">
+                                      <strong>Message:</strong> {module.data.message || 'No message available'}
+                                    </div>
+                                    {module.data.error === 'decryption_failed' && (
+                                      <div className="mt-2">
+                                        <i className="fas fa-lock me-1"></i>
+                                        <small>This usually means the password is incorrect. Please check your login credentials.</small>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          {/* Module Metadata Display - only show if no errors */}
+                          {module.metadata && !module.metadata.error && Array.isArray(module.metadata) && module.metadata.length > 0 && (
                         <div className="mt-3">
                           <h6 className="text-primary">
                             <i className="fas fa-info-circle me-2"></i>
@@ -1422,8 +1885,68 @@ const UMDFViewer = () => {
                       )}
                       
                       {/* Module Data Display */}
-                      {module.type === 'image' && renderImagingModule(module, null)}
-                      {module.type !== 'image' && module.data && Object.keys(module.data).length > 0 && (
+                      {module.type === 'image' && (() => {
+                        // For image modules, check for errors first
+                        const hasMetadataError = module.metadata && module.metadata.error;
+                        const hasDataError = module.data && module.data.error;
+                        
+                        if (hasMetadataError || hasDataError) {
+                          return (
+                            <div className="mt-3">
+                              <h6 className="text-danger">
+                                <i className="fas fa-exclamation-triangle me-2"></i>
+                                Module Error
+                              </h6>
+                              <div className="bg-danger bg-opacity-10 border border-danger p-3 rounded">
+                                {(() => {
+                                  if (hasMetadataError) {
+                                    return (
+                                      <div>
+                                        <div className="text-danger">
+                                          <strong>Error Type:</strong> {module.metadata.error}
+                                        </div>
+                                        <div className="text-danger mt-1">
+                                          <strong>Message:</strong> {module.metadata.message || 'No message available'}
+                                        </div>
+                                        {module.metadata.error === 'decryption_failed' && (
+                                          <div className="mt-2">
+                                            <i className="fas fa-lock me-1"></i>
+                                            <small>This usually means the password is incorrect. Please check your login credentials.</small>
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  } else if (hasDataError) {
+                                    return (
+                                      <div>
+                                        <div className="text-danger">
+                                          <strong>Error Type:</strong> {module.data.error}
+                                        </div>
+                                        <div className="text-danger mt-1">
+                                          <strong>Message:</strong> {module.data.message || 'No message available'}
+                                        </div>
+                                        {module.data.error === 'decryption_failed' && (
+                                          <div className="mt-2">
+                                            <i className="fas fa-lock me-1"></i>
+                                            <small>This usually means the password is incorrect. Please check your login credentials.</small>
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  }
+                                  return null;
+                                })()}
+                              </div>
+                            </div>
+                          );
+                        }
+                        
+                        // If no errors, render the normal image module
+                        return renderImagingModule(module, null);
+                      })()}
+                      
+                      {/* Show actual data if no errors */}
+                      {module.type !== 'image' && module.data && !module.data.error && Object.keys(module.data).length > 0 && (
                         <div className="mt-3">
                           <h6 className="text-success">
                             <i className="fas fa-database me-2"></i>
@@ -1435,14 +1958,16 @@ const UMDFViewer = () => {
                         </div>
                       )}
                       
-                      {/* Show message if no data available */}
-                      {module.type !== 'image' && (!module.data || Object.keys(module.data).length === 0) && (
+                      {/* Show message if no data available and no errors */}
+                      {module.type !== 'image' && (!module.data || Object.keys(module.data).length === 0) && !module.data?.error && (
                         <div className="mt-3 text-center">
                           <div className="text-muted">
                             <i className="fas fa-info-circle me-2"></i>
                             Module data not yet loaded from file
                           </div>
                         </div>
+                      )}
+                        </>
                       )}
                     </div>
                   </div>

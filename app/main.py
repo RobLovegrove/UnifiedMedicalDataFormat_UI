@@ -59,6 +59,34 @@ async def upload_umdf_file(
 
 # Removed old write/read endpoints - now using UMDFReader directly in the importer
 
+@app.post("/api/close")
+async def close_file():
+    """Close the currently open UMDF file."""
+    try:
+        print("=== DEBUG: Closing UMDF file ===")
+        
+        # Check if we have a UMDF importer with an open file
+        if hasattr(umdf_importer, 'reader') and umdf_importer.reader:
+            try:
+                # Close the file using the C++ reader
+                result = umdf_importer.reader.reader.closeFile()
+                if result.success:
+                    print("=== DEBUG: File closed successfully ===")
+                    return {"success": True, "message": "File closed successfully"}
+                else:
+                    print(f"=== DEBUG: Failed to close file: {result.message} ===")
+                    return {"success": False, "message": f"Failed to close file: {result.message}"}
+            except Exception as close_error:
+                print(f"=== DEBUG: Error during file close: {close_error} ===")
+                return {"success": False, "message": f"Error closing file: {close_error}"}
+        else:
+            print("=== DEBUG: No UMDF reader available ===")
+            return {"success": True, "message": "No file was open"}
+            
+    except Exception as e:
+        print(f"=== DEBUG: Unexpected error in close_file: {e} ===")
+        return {"success": False, "message": f"Unexpected error: {e}"}
+
 @app.get("/api/schemas")
 async def get_schemas():
     """Get available JSON schemas."""
@@ -82,9 +110,34 @@ async def get_module_data(module_id: str):
         
         # Call the C++ reader directly since we know the file is open
         # Bypass the Python wrapper's state checking
-        module_data = umdf_importer.reader.reader.getModuleData(module_id)
-        print(f"=== DEBUG: Module data type: {type(module_data)}")
-        print(f"=== DEBUG: Module data: {module_data}")
+        try:
+            module_data = umdf_importer.reader.reader.getModuleData(module_id)
+            print(f"=== DEBUG: Module data type: {type(module_data)}")
+            print(f"=== DEBUG: Module data: {module_data}")
+        except Exception as module_error:
+            error_msg = str(module_error)
+            print(f"=== DEBUG: Error calling getModuleData: {error_msg}")
+            
+            # Check if this is a decryption failure (incorrect password)
+            if "AES-256-GCM decryption failed" in error_msg:
+                print("=== DEBUG: Detected decryption failure - likely incorrect password")
+                return {
+                    "success": False,
+                    "error": "decryption_failed",
+                    "message": "Module decryption failed. The password may be incorrect.",
+                    "metadata": {"error": "Decryption failed - check password"},
+                    "data": {"error": "Decryption failed - check password"}
+                }
+            else:
+                # Other type of error
+                print(f"=== DEBUG: Other type of error: {error_msg}")
+                return {
+                    "success": False,
+                    "error": "module_access_failed",
+                    "message": f"Failed to access module: {error_msg}",
+                    "metadata": {"error": f"Module access failed: {error_msg}"},
+                    "data": {"error": f"Module access failed: {error_msg}"}
+                }
         
         # Check if we have ExpectedModuleData wrapper
         if hasattr(module_data, 'has_value') and module_data.has_value():
@@ -244,8 +297,14 @@ async def get_module_data(module_id: str):
                 metadata_content = {"error": f"Metadata extraction failed: {meta_error}"}
         else:
             print(f"=== DEBUG: ExpectedModuleData has no value")
-            data_content = {"error": "No module data available"}
-            metadata_content = {"error": "No metadata available"}
+            error_msg = module_data.error() if hasattr(module_data, 'error') else "Unknown error"
+            return {
+                "success": False,
+                "error": "decryption_failed",
+                "message": error_msg,
+                "metadata": {"error": error_msg},
+                "data": {"error": error_msg}
+            }
         
         return {
             "success": True,
@@ -258,7 +317,9 @@ async def get_module_data(module_id: str):
         import traceback
         traceback.print_exc()
         return {
-            "success": True,
+            "success": False,
+            "error": "unexpected_error",
+            "message": f"Unexpected error: {e}",
             "metadata": {"error": "Metadata extraction failed in fallback"},
             "data": {"type": "error", "message": f"Data extraction failed: {e}"}
         }
@@ -273,8 +334,9 @@ async def get_file_modules(file_id: str):
 @app.get("/api/cpp/schemas")
 async def get_cpp_schemas():
     """Get schemas supported by the C++ implementation."""
-    schemas = umdf_interface.get_supported_schemas()
-    return {"schemas": schemas}
+    # This endpoint is not currently implemented - return empty list
+    # TODO: Implement schema support if needed
+    return {"schemas": []}
 
 @app.get("/test")
 async def test_route():
