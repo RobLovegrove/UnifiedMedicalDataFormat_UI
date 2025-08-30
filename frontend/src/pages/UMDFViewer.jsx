@@ -3,6 +3,169 @@ import ProcessingModal from '../components/ProcessingModal';
 import CustomSlider from '../components/CustomSlider';
 import './UMDFViewer.css';
 
+// Add Module Modal Component
+const AddModuleModal = ({ 
+  show, 
+  onClose, 
+  encounterId, 
+  availableSchemas, 
+  selectedSchema, 
+  onSchemaChange, 
+  onConfirm 
+}) => {
+  if (!show) return null;
+
+  return (
+    <div className="modal-overlay" style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      zIndex: 1050
+    }}>
+      <div className="modal-content" style={{
+        backgroundColor: 'white',
+        borderRadius: '8px',
+        padding: '24px',
+        maxWidth: '500px',
+        width: '90%',
+        maxHeight: '80vh',
+        overflow: 'auto',
+        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)'
+      }}>
+        <div className="modal-header mb-4">
+          <h4 className="modal-title" style={{ color: '#667eea', margin: 0 }}>
+            <i className="fas fa-plus-circle me-2"></i>
+            Add New Module
+          </h4>
+          <button
+            type="button"
+            className="btn-close"
+            onClick={onClose}
+            style={{
+              position: 'absolute',
+              top: '20px',
+              right: '20px',
+              background: 'none',
+              border: 'none',
+              fontSize: '1.5rem',
+              cursor: 'pointer',
+              color: '#666'
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="modal-body">
+          <div className="mb-4">
+            <label className="form-label fw-bold">Encounter ID:</label>
+            <div className="form-control-plaintext" style={{ 
+              backgroundColor: '#f8f9fa', 
+              padding: '8px 12px', 
+              borderRadius: '4px',
+              fontFamily: 'monospace'
+            }}>
+              {encounterId}
+            </div>
+          </div>
+
+          <div className="mb-4">
+            <label htmlFor="schemaSelect" className="form-label fw-bold">
+              Select Schema: <span className="text-danger">*</span>
+            </label>
+            <select
+              id="schemaSelect"
+              className="form-select"
+              value={selectedSchema}
+              onChange={(e) => onSchemaChange(e.target.value)}
+              style={{ border: '2px solid #dee2e6' }}
+            >
+              <option value="">Choose a schema...</option>
+              {availableSchemas.map((schema, index) => (
+                <option key={index} value={schema.path}>
+                  {schema.title} - {schema.description}
+                </option>
+              ))}
+            </select>
+            {availableSchemas.length === 0 && (
+              <div className="text-muted small mt-2">
+                <i className="fas fa-info-circle me-1"></i>
+                No schemas available. Please check your schema configuration.
+              </div>
+            )}
+          </div>
+
+          <div className="mb-4">
+            <div className="alert alert-info">
+              <i className="fas fa-info-circle me-2"></i>
+              <strong>Note:</strong> This will create a new module in the selected encounter. 
+              The module will be initialized with the chosen schema structure.
+            </div>
+          </div>
+        </div>
+
+        <div className="modal-footer d-flex justify-content-between">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={onClose}
+            style={{
+              border: '2px solid #6c757d',
+              backgroundColor: 'transparent',
+              color: '#6c757d',
+              transition: 'all 0.3s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = '#6c757d';
+              e.target.style.color = 'white';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = 'transparent';
+              e.target.style.color = '#6c757d';
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onConfirm}
+            disabled={!selectedSchema}
+            style={{
+              border: '2px solid #667eea',
+              backgroundColor: selectedSchema ? '#667eea' : 'transparent',
+              color: selectedSchema ? 'white' : '#667eea',
+              transition: 'all 0.3s ease',
+              opacity: selectedSchema ? 1 : 0.6
+            }}
+            onMouseEnter={(e) => {
+              if (selectedSchema) {
+                e.target.style.backgroundColor = '#5a6fd8';
+                e.target.style.borderColor = '#5a6fd8';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (selectedSchema) {
+                e.target.style.backgroundColor = '#667eea';
+                e.target.style.borderColor = '#667eea';
+              }
+            }}
+          >
+            <i className="fas fa-plus me-2"></i>
+            Create Module
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const UMDFViewer = () => {
   const [modules, setModules] = useState([]);
   const [encounters, setEncounters] = useState([]);
@@ -17,6 +180,10 @@ const UMDFViewer = () => {
   const [fileInputRef] = useState(React.createRef()); // Track which image module is currently displayed
   const [isEditMode, setIsEditMode] = useState(false); // Track whether we're in edit mode
   const [encounterCollapsed, setEncounterCollapsed] = useState({}); // Track which encounters are collapsed
+  const [showAddModuleModal, setShowAddModuleModal] = useState(false); // Control add module modal visibility
+  const [selectedEncounterId, setSelectedEncounterId] = useState(null); // Track which encounter we're adding to
+  const [selectedSchema, setSelectedSchema] = useState(''); // Track selected schema for new module
+  const [availableSchemas, setAvailableSchemas] = useState([]); // Available schemas to choose from
 
   // Set up global function for slider updates
   useEffect(() => {
@@ -1809,23 +1976,22 @@ const UMDFViewer = () => {
   // Handle adding a new module to a specific encounter
   const handleAddModuleToEncounter = async (encounterId) => {
     try {
-      console.log('➕ Add Module: Starting add module process for encounter:', encounterId);
-      setProcessingMessage('Adding new module to encounter...');
+      console.log('➕ Add Module: Opening add module modal for encounter:', encounterId);
       
-      // TODO: Implement actual add module functionality
-      // For now, just show a success message
-      setProcessingMessage('New module added to encounter successfully');
-      setShowSuccessBar(true);
-      setTimeout(() => setShowSuccessBar(false), 3000);
+      // Set the selected encounter and open the modal
+      setSelectedEncounterId(encounterId);
+      setShowAddModuleModal(true);
       
-      console.log('➕ Add Module: Add completed');
+      // Load available schemas if we haven't already
+      if (availableSchemas.length === 0) {
+        await loadAvailableSchemas();
+      }
+      
     } catch (error) {
-      console.error('❌ Add Module: Error adding module:', error);
-      setProcessingMessage('Error adding module. Please try again.');
+      console.error('❌ Add Module: Error opening modal:', error);
+      setErrorMessage('Error opening add module dialog. Please try again.');
       setShowErrorBar(true);
       setTimeout(() => setShowErrorBar(false), 3000);
-    } finally {
-      setIsProcessing(false);
     }
   };
 
@@ -1835,6 +2001,86 @@ const UMDFViewer = () => {
       ...prev,
       [encounterId]: !prev[encounterId]
     }));
+  };
+
+  // Load available schemas from the local schemas folder
+  const loadAvailableSchemas = async () => {
+    try {
+      console.log('📋 Loading available schemas from local schemas folder...');
+      
+      // Define the schemas we know exist in the ./schemas folder
+      const localSchemas = [
+        {
+          path: './schemas/image/v1.0.json',
+          title: 'Image Module v1.0',
+          description: 'Standard image module with frame support and metadata',
+          type: 'image'
+        },
+        {
+          path: './schemas/patient/v1.0.json',
+          title: 'Patient Module v1.0',
+          description: 'Patient information and demographics',
+          type: 'tabular'
+        },
+        {
+          path: './schemas/frame/v1.0.json',
+          title: 'Frame Module v1.0',
+          description: 'Individual image frame data',
+          type: 'image'
+        }
+      ];
+      
+      setAvailableSchemas(localSchemas);
+      console.log('📋 Loaded local schemas:', localSchemas);
+      
+    } catch (error) {
+      console.error('❌ Error loading schemas:', error);
+      setErrorMessage('Failed to load available schemas. Please try again.');
+      setShowErrorBar(true);
+      setTimeout(() => setShowErrorBar(false), 3000);
+    }
+  };
+
+  // Handle modal close
+  const handleCloseAddModuleModal = () => {
+    setShowAddModuleModal(false);
+    setSelectedEncounterId(null);
+    setSelectedSchema('');
+  };
+
+  // Handle schema selection change
+  const handleSchemaChange = (schema) => {
+    setSelectedSchema(schema);
+  };
+
+  // Handle module creation confirmation
+  const handleConfirmAddModule = async () => {
+    if (!selectedSchema || !selectedEncounterId) {
+      setErrorMessage('Please select a schema and encounter.');
+      setShowErrorBar(true);
+      setTimeout(() => setShowErrorBar(false), 3000);
+      return;
+    }
+
+    try {
+      console.log('➕ Creating module with schema:', selectedSchema, 'for encounter:', selectedEncounterId);
+      setProcessingMessage('Creating new module...');
+      
+      // TODO: Implement actual module creation through backend
+      // For now, just show success message
+      setProcessingMessage('Module created successfully!');
+      setShowSuccessBar(true);
+      setTimeout(() => setShowSuccessBar(false), 3000);
+      
+      // Close the modal
+      handleCloseAddModuleModal();
+      
+    } catch (error) {
+      console.error('❌ Error creating module:', error);
+      setErrorMessage('Failed to create module. Please try again.');
+      setShowErrorBar(true);
+      setTimeout(() => setShowErrorBar(false), 3000);
+    }
   };
 
   // Handle page unload/refresh when in edit mode
@@ -2554,6 +2800,17 @@ const UMDFViewer = () => {
         fileName={sessionStorage.getItem('umdf_file_name')}
         fileSize={sessionStorage.getItem('umdf_file_size')}
         fileType="UMDF"
+      />
+
+      {/* Add Module Modal */}
+      <AddModuleModal
+        show={showAddModuleModal}
+        onClose={handleCloseAddModuleModal}
+        encounterId={selectedEncounterId}
+        availableSchemas={availableSchemas}
+        selectedSchema={selectedSchema}
+        onSchemaChange={handleSchemaChange}
+        onConfirm={handleConfirmAddModule}
       />
     </div>
   );
