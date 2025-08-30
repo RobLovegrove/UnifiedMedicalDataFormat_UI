@@ -83,13 +83,62 @@ const HomePage = () => {
     }
   }, []);
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (username.trim() && password.trim()) {
-      // Store credentials in session storage
-      sessionStorage.setItem('umdf_username', username.trim());
-      sessionStorage.setItem('umdf_password', password);
-      setShowLoginModal(false);
+      try {
+        // Store credentials in backend
+        const formData = new FormData();
+        formData.append('username', username.trim());
+        formData.append('password', password);
+        
+        const response = await fetch('/api/store-credentials', {
+          method: 'POST',
+          body: formData
+        });
+        
+        if (response.ok) {
+          // Store credentials in session storage for frontend use
+          sessionStorage.setItem('umdf_username', username.trim());
+          sessionStorage.setItem('umdf_password', password);
+          setShowLoginModal(false);
+          console.log('✅ Credentials stored successfully in backend');
+        } else {
+          console.error('❌ Failed to store credentials in backend');
+          // Still store in session storage as fallback
+          sessionStorage.setItem('umdf_username', username.trim());
+          sessionStorage.setItem('umdf_password', password);
+          setShowLoginModal(false);
+        }
+      } catch (error) {
+        console.error('❌ Error storing credentials:', error);
+        // Fallback to session storage only
+        sessionStorage.setItem('umdf_username', username.trim());
+        sessionStorage.setItem('umdf_password', password);
+        setShowLoginModal(false);
+      }
     }
+  };
+
+  const handleLogout = async () => {
+    try {
+      // Clear credentials from backend
+      const response = await fetch('/api/logout', {
+        method: 'POST'
+      });
+      
+      if (response.ok) {
+        console.log('✅ Successfully logged out from backend');
+      } else {
+        console.warn('⚠️ Failed to logout from backend, but continuing with frontend logout');
+      }
+    } catch (error) {
+      console.warn('⚠️ Error during backend logout:', error);
+    }
+    
+    // Clear credentials from session storage
+    sessionStorage.removeItem('umdf_username');
+    sessionStorage.removeItem('umdf_password');
+    setShowLoginModal(true);
   };
 
   const handleFileSelect = async () => {
@@ -257,11 +306,7 @@ const HomePage = () => {
                         </small>
                         <button
                           className="btn btn-outline-secondary btn-sm"
-                          onClick={() => {
-                            sessionStorage.removeItem('umdf_username');
-                            sessionStorage.removeItem('umdf_password');
-                            setShowLoginModal(true);
-                          }}
+                          onClick={handleLogout}
                         >
                           <i className="fas fa-sign-out-alt me-1"></i>
                           Change User

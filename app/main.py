@@ -24,25 +24,157 @@ schema_manager = SchemaManager()
 umdf_importer = UMDFImporter()
 umdf_writer = UMDFWriter()
 
+# Store user credentials (simple in-memory storage for prototype)
+stored_credentials = {
+    "username": None,
+    "password": None
+}
+
 # API Routes first
+@app.post("/api/store-credentials")
+async def store_credentials(username: str = Form(...), password: str = Form(...)):
+    """Store user credentials for use in subsequent operations."""
+    global stored_credentials
+    
+    # Validate inputs
+    if not username or not username.strip():
+        return {"success": False, "error": "Username cannot be empty"}
+    
+    if not password or not password.strip():
+        return {"success": False, "error": "Password cannot be empty"}
+    
+    stored_credentials["username"] = username.strip()
+    stored_credentials["password"] = password.strip()
+    print(f"=== DEBUG: Stored credentials for user: {username} ===")
+    print(f"=== DEBUG: Password length: {len(password)}")
+    print(f"=== DEBUG: Password starts with: {password[:3] if len(password) >= 3 else 'N/A'}...")
+    print(f"=== DEBUG: Stored credentials state: {stored_credentials}")
+    return {"success": True, "message": "Credentials stored successfully"}
+
+@app.post("/api/logout")
+async def logout():
+    """Clear stored user credentials."""
+    global stored_credentials
+    stored_credentials["username"] = None
+    stored_credentials["password"] = None
+    print("=== DEBUG: Cleared stored credentials ===")
+    return {"success": True, "message": "Logged out successfully"}
+
+@app.get("/api/debug/credentials")
+async def debug_credentials():
+    """Debug endpoint to check stored credentials (for development only)."""
+    return {
+        "username": stored_credentials["username"],
+        "password_length": len(stored_credentials["password"]) if stored_credentials["password"] else 0,
+        "password_starts_with": stored_credentials["password"][:3] if stored_credentials["password"] and len(stored_credentials["password"]) >= 3 else "N/A",
+        "has_password": bool(stored_credentials["password"])
+    }
+
+@app.get("/schemas/{schema_path:path}")
+async def get_schema_file(schema_path: str):
+    """Serve schema files dynamically from the local schemas folder."""
+    try:
+        import os
+        from pathlib import Path
+        
+        # Construct the full path to the schema file
+        schemas_dir = Path(__file__).parent.parent / "schemas"
+        schema_file_path = schemas_dir / schema_path
+        
+        # Security check: ensure the path is within the schemas directory
+        try:
+            schema_file_path.resolve().relative_to(schemas_dir.resolve())
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid schema path")
+        
+        # Check if file exists
+        if not schema_file_path.exists():
+            raise HTTPException(status_code=404, detail=f"Schema file not found: {schema_path}")
+        
+        # Read and return the schema file
+        with open(schema_file_path, 'r', encoding='utf-8') as f:
+            schema_content = f.read()
+        
+        print(f"=== DEBUG: Served schema file: {schema_path} ===")
+        return {"content": schema_content, "path": schema_path}
+        
+    except Exception as e:
+        print(f"=== DEBUG: Error serving schema {schema_path}: {e} ===")
+        raise HTTPException(status_code=500, detail=f"Error reading schema file: {str(e)}")
+
+@app.get("/api/schemas")
+async def discover_schemas():
+    """Discover available schemas in the local schemas folder."""
+    try:
+        import os
+        from pathlib import Path
+        
+        schemas_dir = Path(__file__).parent.parent / "schemas"
+        schemas = []
+        
+        # Scan the schemas directory for JSON files
+        for schema_file in schemas_dir.rglob("*.json"):
+            if schema_file.is_file():
+                # Get relative path from schemas directory
+                relative_path = schema_file.relative_to(schemas_dir)
+                schema_path = f"./schemas/{relative_path}"
+                
+                # Read schema to get title and description
+                try:
+                    with open(schema_file, 'r', encoding='utf-8') as f:
+                        schema_data = json.loads(f.read())
+                    
+                    schemas.append({
+                        "path": str(schema_path),
+                        "title": schema_data.get("title", f"{relative_path.stem} Module"),
+                        "description": schema_data.get("description", "No description available"),
+                        "type": schema_data.get("module_type", "unknown"),
+                        "version": relative_path.parent.name if relative_path.parent.name != "schemas" else "v1.0"
+                    })
+                except Exception as e:
+                    print(f"=== DEBUG: Error reading schema {schema_file}: {e} ===")
+                    # Add basic info even if we can't read the full schema
+                    schemas.append({
+                        "path": str(schema_path),
+                        "title": f"{relative_path.stem} Module",
+                        "description": "Schema file (could not read details)",
+                        "type": "unknown",
+                        "version": relative_path.parent.name if relative_path.parent.name != "schemas" else "v1.0"
+                    })
+        
+        print(f"=== DEBUG: Discovered {len(schemas)} schemas ===")
+        return {"schemas": schemas}
+        
+    except Exception as e:
+        print(f"=== DEBUG: Error discovering schemas: {e} ===")
+        raise HTTPException(status_code=500, detail=f"Error discovering schemas: {str(e)}")
+
 @app.post("/api/upload/umdf")
 async def upload_umdf_file(
-    file: UploadFile = File(...),
-    password: str = Form("")  # Accept password from form data
+    file: UploadFile = File(...)
 ):
     """Upload and process a UMDF file."""
     print("=== DEBUG: /api/upload/umdf route registered ===")
-    print(f"=== DEBUG: Password provided: {'Yes' if password else 'No'}")
     
     try:
         if not file.filename.endswith('.umdf'):
             raise HTTPException(status_code=400, detail="Only .umdf files are supported")
         
+        # Check if we have stored credentials
+        if not stored_credentials["password"]:
+            return {"success": False, "error": "No credentials stored. Please log in first."}
+        
+        print(f"=== DEBUG: Using stored credentials for user: {stored_credentials['username']}")
+        print(f"=== DEBUG: Password length: {len(stored_credentials['password'])}")
+        print(f"=== DEBUG: Password starts with: {stored_credentials['password'][:3]}...")
+        
         # Read file content
         file_content = await file.read()
+        print(f"=== DEBUG: File content size: {len(file_content)} bytes")
         
-        # Import the UMDF file with password
-        result = umdf_importer.import_file(file_content, file.filename, password)
+        # Import the UMDF file with stored password
+        print(f"=== DEBUG: Calling umdf_importer.import_file with password length: {len(stored_credentials['password'])}")
+        result = umdf_importer.import_file(file_content, file.filename, stored_credentials["password"])
         
         return {
             "success": True,
@@ -93,10 +225,14 @@ async def close_file():
         return {"success": False, "message": f"Unexpected error: {e}"}
 
 @app.post("/api/edit")
-async def edit_file(file_path: str = Form(...), password: str = Form("")):
+async def edit_file(file_path: str = Form(...)):
     """Switch from reader mode to writer mode for the current file."""
     try:
         print(f"=== DEBUG: Switching to edit mode for file: {file_path} ===")
+        
+        # Check if we have stored credentials
+        if not stored_credentials["password"]:
+            return {"success": False, "message": "No credentials stored. Please log in first."}
         
         # For a local prototype, we'll use the file path constructed from the filename
         # and the known UMDF projects directory
@@ -107,13 +243,13 @@ async def edit_file(file_path: str = Form(...), password: str = Form("")):
         
         # Now open the file with the writer using the file path from frontend
         try:
-            username = "current_user"  # This should come from frontend
+            username = stored_credentials["username"] or "current_user"
             
             print(f"=== DEBUG: Opening file with writer: {file_path}, user: {username} ===")
             print(f"=== DEBUG: Writer object before open: {umdf_writer}")
             print(f"=== DEBUG: Writer current_file before open: {getattr(umdf_writer, 'current_file', 'NOT_SET')}")
             
-            result = umdf_writer.open_file(file_path, username, password)
+            result = umdf_writer.open_file(file_path, username, stored_credentials["password"])
             
             print(f"=== DEBUG: open_file result: {result}")
             print(f"=== DEBUG: Writer current_file after open: {getattr(umdf_writer, 'current_file', 'NOT_SET')}")
@@ -265,8 +401,9 @@ async def get_module_data(module_id: str, password: str = ""):
                     # Store current writer state
                     current_writer_file = umdf_writer.current_file
                     
-                    # Temporarily reopen with reader
-                    temp_result = umdf_importer.import_file_from_path(current_writer_file, "")
+                    # Temporarily reopen with reader using the password parameter
+                    print(f"=== DEBUG: Temporarily reopening file with password for module data access")
+                    temp_result = umdf_importer.import_file_from_path(current_writer_file, password)
                     if temp_result:
                         module_data = umdf_importer.reader.reader.getModuleData(module_id)
                         print(f"=== DEBUG: Got module data through temporary reader: {type(module_data)}")

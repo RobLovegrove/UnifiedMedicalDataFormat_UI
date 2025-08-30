@@ -21,7 +21,7 @@ def main():
     print(f"Starting Medical File Format UI...")
     print(f"Server: http://{host}:{port}")
     print(f"API Docs: http://{host}:{port}/docs")
-    print(f"Reload: {reload}")
+    print(f"Reload: False")  # Changed from True to False
     print("-" * 50)
     
     # Start the server
@@ -29,7 +29,7 @@ def main():
         "app.main:app",
         host=host,
         port=port,
-        reload=reload,
+        reload=False,  # Disabled auto-reload
         log_level="info"
     )
 

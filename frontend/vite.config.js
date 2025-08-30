@@ -7,7 +7,8 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/umdf-viewer': 'http://localhost:8000',
-      '/api': 'http://localhost:8000'
+      '/api': 'http://localhost:8000',
+      '/schemas': 'http://localhost:8000'
     }
   },
   build: {

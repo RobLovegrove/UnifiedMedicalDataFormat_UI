@@ -123,6 +123,9 @@ class UMDFImporter:
             try:
                 # Open the file using the C++ reader
                 print("Opening UMDF file with reader.openFile...")
+                print(f"=== DEBUG: Password parameter type: {type(password)}")
+                print(f"=== DEBUG: Password parameter length: {len(password) if password else 'None'}")
+                print(f"=== DEBUG: Password parameter value: {repr(password)}")
                 
                 # Use the password provided by the frontend
                 result = self.reader.reader.openFile(temp_path, password)
@@ -158,8 +161,9 @@ class UMDFImporter:
                         print(f"    Available keys: {list(module.keys())}")
                 print("=== END DEBUG ===")
             
-            # Don't close the file yet - we need it open for getModuleData calls
-            # self.reader.reader.closeFile()
+            # Don't close the file here - keep it open for module data access
+            # The file will be closed when the importer is cleaned up or when explicitly requested
+            print("UMDF file kept open for module data access")
             
             # Check if the file info indicates success
             if not file_info or not file_info.get('success', False):

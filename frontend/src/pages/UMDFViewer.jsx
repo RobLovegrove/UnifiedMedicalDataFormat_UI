@@ -3,6 +3,129 @@ import ProcessingModal from '../components/ProcessingModal';
 import CustomSlider from '../components/CustomSlider';
 import './UMDFViewer.css';
 
+// Parse schema to extract form fields dynamically from actual schema files
+const parseSchemaForForm = async (schemaPath) => {
+  try {
+    console.log('🔍 Loading schema from:', schemaPath);
+    
+    // Convert relative path to schema path for the backend endpoint
+    const schemaPathForBackend = schemaPath.replace('./schemas/', '');
+    
+    console.log('🔍 Fetching schema from backend:', schemaPathForBackend);
+    
+    const response = await fetch(`/schemas/${schemaPathForBackend}`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch schema: ${response.status} ${response.statusText}`);
+    }
+    
+    const result = await response.json();
+    console.log('🔍 Raw response from backend:', result);
+    
+    const schema = JSON.parse(result.content);
+    console.log('🔍 Parsed schema object:', schema);
+    
+    // Parse the actual schema structure to create form fields
+    const formFields = {
+      title: schema.title || 'Unknown Module',
+      metadata: {},
+      imageStructure: {},
+      data: {}
+    };
+    
+    console.log('🔍 Schema properties:', schema.properties);
+    console.log('🔍 Schema metadata properties:', schema.properties?.metadata?.properties);
+    console.log('🔍 Schema data properties:', schema.properties?.data?.properties);
+    
+    // Parse metadata section
+    if (schema.properties && schema.properties.metadata && schema.properties.metadata.properties) {
+      console.log('🔍 Processing metadata section...');
+      Object.keys(schema.properties.metadata.properties).forEach(key => {
+        const field = schema.properties.metadata.properties[key];
+        console.log(`🔍 Processing metadata field: ${key}`, field);
+        formFields.metadata[key] = {
+          type: getFieldType(field),
+          required: schema.properties.metadata.required?.includes(key) || false,
+          description: field.description || '',
+          ...getFieldConstraints(field)
+        };
+      });
+    } else {
+      console.log('🔍 No metadata section found or invalid structure');
+    }
+    
+    // Parse image structure section (for image modules)
+    if (schema.properties && schema.properties.metadata && schema.properties.metadata.properties && 
+        schema.properties.metadata.properties.image_structure && schema.properties.metadata.properties.image_structure.properties) {
+      console.log('🔍 Processing image structure section...');
+      Object.keys(schema.properties.metadata.properties.image_structure.properties).forEach(key => {
+        const field = schema.properties.metadata.properties.image_structure.properties[key];
+        console.log(`🔍 Processing image structure field: ${key}`, field);
+        formFields.imageStructure[key] = {
+          type: getFieldType(field),
+          required: schema.properties.metadata.properties.image_structure.required?.includes(key) || false,
+          description: field.description || '',
+          ...getFieldConstraints(field)
+        };
+      });
+    } else {
+      console.log('🔍 No image structure section found');
+    }
+    
+    // Parse data section
+    if (schema.properties && schema.properties.data && schema.properties.data.properties) {
+      console.log('🔍 Processing data section...');
+      Object.keys(schema.properties.data.properties).forEach(key => {
+        const field = schema.properties.data.properties[key];
+        console.log(`🔍 Processing data field: ${key}`, field);
+        formFields.data[key] = {
+          type: getFieldType(field),
+          required: schema.properties.data.required?.includes(key) || false,
+          description: field.description || '',
+          ...getFieldConstraints(field)
+        };
+      });
+    } else {
+      console.log('🔍 No data section found or invalid structure');
+    }
+    
+    console.log('🔍 Final parsed form fields:', formFields);
+    return formFields;
+    
+  } catch (error) {
+    console.error('❌ Error parsing schema:', error);
+    console.error('❌ Error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    return null;
+  }
+};
+
+// Helper function to determine field type from schema
+const getFieldType = (field) => {
+  if (field.enum) return 'select';
+  if (field.type === 'array') return 'array';
+  if (field.type === 'object') return 'object';
+  if (field.format === 'date') return 'date';
+  if (field.type === 'integer' || field.type === 'number') return 'number';
+  return 'string';
+};
+
+// Helper function to extract field constraints
+const getFieldConstraints = (field) => {
+  const constraints = {};
+  
+  if (field.minimum !== undefined) constraints.min = field.minimum;
+  if (field.maximum !== undefined) constraints.max = field.maximum;
+  if (field.minLength !== undefined) constraints.minLength = field.minLength;
+  if (field.maxLength !== undefined) constraints.maxLength = field.maxLength;
+  if (field.enum) constraints.options = field.enum;
+  if (field.length !== undefined) constraints.length = field.length;
+  
+  return constraints;
+};
+
 // Add Module Modal Component
 const AddModuleModal = ({ 
   show, 
@@ -11,10 +134,176 @@ const AddModuleModal = ({
   availableSchemas, 
   selectedSchema, 
   onSchemaChange, 
-  onConfirm 
+  onConfirm,
+  onSchemaConfirm,
+  showForm,
+  formData,
+  onFormFieldChange,
+  onArrayFieldChange,
+  onBackToSchemaSelection,
+  onFormConfirm,
+  parsedSchema
 }) => {
   if (!show) return null;
 
+  // Render the form if showForm is true
+  if (showForm) {
+    if (!parsedSchema) return null;
+
+    return (
+      <div className="modal-overlay" style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 1050
+      }}>
+        <div className="modal-content" style={{
+          backgroundColor: 'white',
+          borderRadius: '8px',
+          padding: '24px',
+          maxWidth: '800px',
+          width: '95%',
+          maxHeight: '90vh',
+          overflow: 'auto',
+          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)'
+        }}
+        onWheel={(e) => {
+          // Prevent scroll event from bubbling up to the background page
+          e.stopPropagation();
+        }}
+        onScroll={(e) => {
+          // Prevent scroll event from bubbling up to the background page
+          e.stopPropagation();
+        }}
+        >
+          <div className="modal-header mb-4">
+            <button
+              type="button"
+              className="btn btn-link p-0 me-3"
+              onClick={onBackToSchemaSelection}
+              style={{
+                color: '#667eea',
+                textDecoration: 'none',
+                fontSize: '1.2rem'
+              }}
+            >
+              <i className="fas fa-arrow-left me-1"></i>
+              Back
+            </button>
+            <h4 className="modal-title" style={{ color: '#667eea', margin: 0 }}>
+              <i className="fas fa-edit me-2"></i>
+              Configure {parsedSchema.title}
+            </h4>
+            <button
+              type="button"
+              className="btn-close"
+              onClick={onClose}
+              style={{
+                position: 'absolute',
+                top: '20px',
+                right: '20px',
+                background: 'none',
+                border: 'none',
+                fontSize: '1.5rem',
+                cursor: 'pointer',
+                color: '#666'
+              }}
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="modal-body">
+            <div className="mb-4">
+              <label className="form-label fw-bold">Encounter ID:</label>
+              <div className="form-control-plaintext" style={{ 
+                backgroundColor: '#f8f9fa', 
+                padding: '8px 12px', 
+                borderRadius: '4px',
+                fontFamily: 'monospace'
+              }}>
+                {encounterId}
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <label className="form-label fw-bold">Selected Schema:</label>
+              <div className="form-control-plaintext" style={{ 
+                backgroundColor: '#f8f9fa', 
+                padding: '8px 12px', 
+                borderRadius: '4px',
+                fontFamily: 'monospace'
+              }}>
+                {selectedSchema}
+              </div>
+            </div>
+
+            {/* Dynamic Form Fields */}
+            <DynamicForm
+              parsedSchema={parsedSchema}
+              formData={formData}
+              onFormFieldChange={onFormFieldChange}
+              onArrayFieldChange={onArrayFieldChange}
+            />
+          </div>
+
+          <div className="modal-footer d-flex justify-content-between">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onBackToSchemaSelection}
+              style={{
+                border: '2px solid #6c757d',
+                backgroundColor: 'transparent',
+                color: '#6c757d',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = '#6c757d';
+                e.target.style.color = 'white';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = 'transparent';
+                e.target.style.color = '#6c757d';
+              }}
+            >
+              Back to Schema Selection
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={onFormConfirm}
+              style={{
+                border: '2px solid #667eea',
+                backgroundColor: '#667eea',
+                color: 'white',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = '#5a6fd8';
+                e.target.style.borderColor = '#5a6fd8';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = '#667eea';
+                e.target.style.borderColor = '#667eea';
+              }}
+            >
+              <i className="fas fa-check me-2"></i>
+              Create Module
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Render the schema selection view
   return (
     <div className="modal-overlay" style={{
       position: 'fixed',
@@ -28,17 +317,26 @@ const AddModuleModal = ({
       alignItems: 'center',
       zIndex: 1050
     }}>
-      <div className="modal-content" style={{
-        backgroundColor: 'white',
-        borderRadius: '8px',
-        padding: '24px',
-        maxWidth: '500px',
-        width: '90%',
-        maxHeight: '80vh',
-        overflow: 'auto',
-        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)'
-      }}>
-        <div className="modal-header mb-4">
+        <div className="modal-content" style={{
+          backgroundColor: 'white',
+          borderRadius: '8px',
+          padding: '24px',
+          maxWidth: '500px',
+          width: '90%',
+          maxHeight: '80vh',
+          overflow: 'auto',
+          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)'
+        }}
+        onWheel={(e) => {
+          // Prevent scroll event from bubbling up to the background page
+          e.stopPropagation();
+        }}
+        onScroll={(e) => {
+          // Prevent scroll event from bubbling up to the background page
+          e.stopPropagation();
+        }}
+        >
+          <div className="modal-header mb-4">
           <h4 className="modal-title" style={{ color: '#667eea', margin: 0 }}>
             <i className="fas fa-plus-circle me-2"></i>
             Add New Module
@@ -135,7 +433,7 @@ const AddModuleModal = ({
           <button
             type="button"
             className="btn btn-primary"
-            onClick={onConfirm}
+            onClick={onSchemaConfirm}
             disabled={!selectedSchema}
             style={{
               border: '2px solid #667eea',
@@ -157,11 +455,226 @@ const AddModuleModal = ({
               }
             }}
           >
-            <i className="fas fa-plus me-2"></i>
-            Create Module
+            <i className="fas fa-arrow-right me-2"></i>
+            Next: Configure Module
           </button>
         </div>
       </div>
+    </div>
+  );
+};
+
+// Dynamic Form Component
+const DynamicForm = ({ parsedSchema, formData, onFormFieldChange, onArrayFieldChange }) => {
+  const renderField = (section, fieldName, fieldConfig, value) => {
+    const fieldId = `${section}_${fieldName}`;
+    const isRequired = fieldConfig.required !== false; // Default to required unless explicitly false
+    
+    if (fieldConfig.type === 'select') {
+      return (
+        <div className="mb-3" key={fieldId}>
+          <label htmlFor={fieldId} className="form-label fw-bold">
+            {fieldName.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:
+            {isRequired && <span className="text-danger ms-1">*</span>}
+          </label>
+          <select
+            id={fieldId}
+            className="form-select"
+            value={value || ''}
+            onChange={(e) => onFormFieldChange(section, fieldName, e.target.value)}
+            style={{ border: '2px solid #dee2e6' }}
+          >
+            <option value="">Select...</option>
+            {fieldConfig.options.map((option, index) => (
+              <option key={index} value={option}>{option}</option>
+            ))}
+          </select>
+          {fieldConfig.description && (
+            <div className="form-text text-muted">
+              <i className="fas fa-info-circle me-1"></i>
+              {fieldConfig.description}
+            </div>
+          )}
+        </div>
+      );
+    }
+    
+    if (fieldConfig.type === 'number') {
+      return (
+        <div className="mb-3" key={fieldId}>
+          <label htmlFor={fieldId} className="form-label fw-bold">
+            {fieldName.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:
+            {isRequired && <span className="text-danger ms-1">*</span>}
+          </label>
+          <input
+            type="number"
+            id={fieldId}
+            className="form-control"
+            value={value || ''}
+            onChange={(e) => onFormFieldChange(section, fieldName, e.target.value)}
+            min={fieldConfig.min}
+            max={fieldConfig.max}
+            style={{ border: '2px solid #dee2e6' }}
+          />
+          {fieldConfig.description && (
+            <div className="form-text text-muted">
+              <i className="fas fa-info-circle me-1"></i>
+              {fieldConfig.description}
+            </div>
+          )}
+        </div>
+      );
+    }
+    
+    if (fieldConfig.type === 'date') {
+      return (
+        <div className="mb-3" key={fieldId}>
+          <label htmlFor={fieldId} className="form-label fw-bold">
+            {fieldName.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:
+            {isRequired && <span className="text-danger ms-1">*</span>}
+          </label>
+          <input
+            type="date"
+            id={fieldId}
+            className="form-control"
+            value={value || ''}
+            onChange={(e) => onFormFieldChange(section, fieldName, e.target.value)}
+            style={{ border: '2px solid #dee2e6' }}
+          />
+          {fieldConfig.description && (
+            <div className="form-text text-muted">
+              <i className="fas fa-info-circle me-1"></i>
+              {fieldConfig.description}
+            </div>
+          )}
+        </div>
+      );
+    }
+    
+    if (fieldConfig.type === 'array') {
+      return (
+        <div className="mb-3" key={fieldId}>
+          <label htmlFor={fieldId} className="form-label fw-bold">
+            {fieldName.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:
+            {isRequired && <span className="text-danger ms-1">*</span>}
+          </label>
+          <input
+            type="text"
+            id={fieldId}
+            className="form-control"
+            value={Array.isArray(value) ? value.join(', ') : ''}
+            onChange={(e) => onArrayFieldChange(section, fieldName, e.target.value)}
+            placeholder="e.g., 256, 256, 12, 5"
+            style={{ border: '2px solid #dee2e6' }}
+          />
+          {fieldConfig.description && (
+            <div className="form-text text-muted">
+              <i className="fas fa-info-circle me-1"></i>
+              {fieldConfig.description}
+            </div>
+          )}
+        </div>
+      );
+    }
+    
+    if (fieldConfig.type === 'object') {
+      return (
+        <div className="mb-4" key={fieldId}>
+          <label className="form-label fw-bold">
+            {fieldName.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:
+            {isRequired && <span className="text-danger ms-1">*</span>}
+          </label>
+          <div className="border rounded p-3" style={{ backgroundColor: '#f8f9fa' }}>
+            {Object.keys(fieldConfig).map(subFieldName => {
+              const subField = fieldConfig[subFieldName];
+              if (typeof subField === 'object' && subField.type) {
+                return renderField(section, fieldName, subField, value?.[subFieldName]);
+              }
+              return null;
+            })}
+          </div>
+        </div>
+      );
+    }
+    
+    // Default to string input
+    return (
+      <div className="mb-3" key={fieldId}>
+        <label htmlFor={fieldId} className="form-label fw-bold">
+          {fieldName.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:
+          {isRequired && <span className="text-danger ms-1">*</span>}
+        </label>
+        <input
+          type="text"
+          id={fieldId}
+          className="form-control"
+          value={value || ''}
+          onChange={(e) => onFormFieldChange(section, fieldName, e.target.value)}
+          maxLength={fieldConfig.length}
+          style={{ border: '2px solid #dee2e6' }}
+        />
+        {fieldConfig.description && (
+          <div className="form-text text-muted">
+            <i className="fas fa-info-circle me-1"></i>
+            {fieldConfig.description}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="dynamic-form">
+      {/* Metadata Section */}
+      {parsedSchema.metadata && (
+        <div className="mb-4">
+          <h5 className="text-primary mb-3">
+            <i className="fas fa-tags me-2"></i>
+            Metadata
+          </h5>
+          <div className="row">
+            {Object.keys(parsedSchema.metadata).map(fieldName => {
+              const fieldConfig = parsedSchema.metadata[fieldName];
+              return renderField('metadata', fieldName, fieldConfig, formData.metadata?.[fieldName]);
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Image Structure Section (for image modules) */}
+      {parsedSchema.imageStructure && (
+        <div className="mb-4">
+          <h5 className="text-success mb-3">
+            <i className="fas fa-image me-2"></i>
+            Image Structure
+          </h5>
+          <div className="row">
+            {Object.keys(parsedSchema.imageStructure).map(fieldName => {
+              const fieldConfig = parsedSchema.imageStructure[fieldName];
+              return renderField('imageStructure', fieldName, fieldConfig, formData.imageStructure?.[fieldName]);
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Data Section */}
+      {parsedSchema.data && (
+        <div className="mb-4">
+          <h5 className="text-info mb-3">
+            <i className="fas fa-database me-2"></i>
+            Data
+          </h5>
+          <div className="row">
+            {Object.keys(parsedSchema.data).map(fieldName => {
+              const fieldConfig = parsedSchema.data[fieldName];
+              if (typeof fieldConfig === 'object' && fieldConfig.type) {
+                return renderField('data', fieldName, fieldConfig, formData.data?.[fieldName]);
+              }
+              return null;
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -184,6 +697,9 @@ const UMDFViewer = () => {
   const [selectedEncounterId, setSelectedEncounterId] = useState(null); // Track which encounter we're adding to
   const [selectedSchema, setSelectedSchema] = useState(''); // Track selected schema for new module
   const [availableSchemas, setAvailableSchemas] = useState([]); // Available schemas to choose from
+  const [formData, setFormData] = useState({}); // Store form data for the new module
+  const [showForm, setShowForm] = useState(false); // Control whether to show schema selection or form
+  const [parsedSchema, setParsedSchema] = useState(null); // Store the parsed schema for the form
 
   // Set up global function for slider updates
   useEffect(() => {
@@ -1804,9 +2320,8 @@ const UMDFViewer = () => {
       // Create form data for the edit request
       const formData = new FormData();
       formData.append('file_path', pathToSend);
-      if (storedPassword) {
-        formData.append('password', storedPassword);
-      }
+      // Password is now stored in backend - no need to send it
+      console.log('🔐 Using stored credentials from backend for edit mode');
       
       // Call the edit endpoint to switch to writer mode
       console.log('✏️ Edit File: Sending request to /api/edit...');
@@ -2006,32 +2521,18 @@ const UMDFViewer = () => {
   // Load available schemas from the local schemas folder
   const loadAvailableSchemas = async () => {
     try {
-      console.log('📋 Loading available schemas from local schemas folder...');
+      console.log('📋 Loading available schemas from backend...');
       
-      // Define the schemas we know exist in the ./schemas folder
-      const localSchemas = [
-        {
-          path: './schemas/image/v1.0.json',
-          title: 'Image Module v1.0',
-          description: 'Standard image module with frame support and metadata',
-          type: 'image'
-        },
-        {
-          path: './schemas/patient/v1.0.json',
-          title: 'Patient Module v1.0',
-          description: 'Patient information and demographics',
-          type: 'tabular'
-        },
-        {
-          path: './schemas/frame/v1.0.json',
-          title: 'Frame Module v1.0',
-          description: 'Individual image frame data',
-          type: 'image'
-        }
-      ];
+      const response = await fetch('/api/schemas');
+      if (!response.ok) {
+        throw new Error(`Failed to fetch schemas: ${response.status} ${response.statusText}`);
+      }
       
-      setAvailableSchemas(localSchemas);
-      console.log('📋 Loaded local schemas:', localSchemas);
+      const result = await response.json();
+      const schemas = result.schemas || [];
+      
+      setAvailableSchemas(schemas);
+      console.log('📋 Loaded schemas from backend:', schemas);
       
     } catch (error) {
       console.error('❌ Error loading schemas:', error);
@@ -2046,12 +2547,147 @@ const UMDFViewer = () => {
     setShowAddModuleModal(false);
     setSelectedEncounterId(null);
     setSelectedSchema('');
+    setFormData({});
+    setShowForm(false);
+    setParsedSchema(null);
   };
 
   // Handle schema selection change
   const handleSchemaChange = (schema) => {
     setSelectedSchema(schema);
   };
+
+  // Handle schema selection confirmation and show form
+  const handleSchemaConfirm = async () => {
+    if (!selectedSchema) {
+      setErrorMessage('Please select a schema first.');
+      setShowErrorBar(true);
+      setTimeout(() => setShowErrorBar(false), 3000);
+      return;
+    }
+    
+    try {
+      // Parse the schema and initialize form data
+      const parsedSchemaResult = await parseSchemaForForm(selectedSchema);
+      if (parsedSchemaResult) {
+        // Store the parsed schema in state
+        setParsedSchema(parsedSchemaResult);
+        
+        // Initialize form data with empty values
+        const initialFormData = {};
+        
+        // Initialize metadata fields
+        if (parsedSchemaResult.metadata) {
+          initialFormData.metadata = {};
+          Object.keys(parsedSchemaResult.metadata).forEach(key => {
+            const field = parsedSchemaResult.metadata[key];
+            if (field.type === 'array') {
+              initialFormData.metadata[key] = [];
+            } else if (field.type === 'object') {
+              initialFormData.metadata[key] = {};
+              Object.keys(field).forEach(subKey => {
+                if (typeof field[subKey] === 'object' && field[subKey].type) {
+                  initialFormData.metadata[key][subKey] = '';
+                }
+              });
+            } else {
+              initialFormData.metadata[key] = '';
+            }
+          });
+        }
+        
+        // Initialize image structure fields (for image modules)
+        if (parsedSchemaResult.imageStructure) {
+          initialFormData.imageStructure = {};
+          Object.keys(parsedSchemaResult.imageStructure).forEach(key => {
+            const field = parsedSchemaResult.imageStructure[key];
+            if (field.type === 'array') {
+              initialFormData.imageStructure[key] = [];
+            } else {
+              initialFormData.imageStructure[key] = '';
+            }
+          });
+        }
+        
+        // Initialize data fields
+        if (parsedSchemaResult.data) {
+          initialFormData.data = {};
+          Object.keys(parsedSchemaResult.data).forEach(key => {
+            const field = parsedSchemaResult.data[key];
+            if (field.type === 'array') {
+              initialFormData.data[key] = [];
+            } else if (field.type === 'object') {
+              initialFormData.data[key] = {};
+              Object.keys(field).forEach(subKey => {
+                if (typeof field[subKey] === 'object' && field[subKey].type) {
+                  initialFormData.data[key][subKey] = '';
+                }
+              });
+            } else {
+              initialFormData.data[key] = '';
+            }
+          });
+        }
+        
+        setFormData(initialFormData);
+        setShowForm(true);
+        console.log('✅ Form initialized with schema:', parsedSchemaResult);
+        console.log('✅ Initial form data:', initialFormData);
+      } else {
+        setErrorMessage('Failed to parse selected schema. Please try again.');
+        setShowErrorBar(true);
+        setTimeout(() => setShowErrorBar(false), 3000);
+      }
+    } catch (error) {
+      console.error('❌ Error handling schema confirmation:', error);
+      setErrorMessage('Error processing schema. Please try again.');
+      setShowErrorBar(true);
+      setTimeout(() => setShowErrorBar(false), 3000);
+    }
+  };
+
+  // Handle form field updates
+  const handleFormFieldChange = (section, field, value, subField = null) => {
+    setFormData(prev => {
+      const newData = { ...prev };
+      if (subField !== null) {
+        // Handle nested fields (e.g., name.given, name.family)
+        if (!newData[section]) newData[section] = {};
+        if (!newData[section][field]) newData[section][field] = {};
+        newData[section][field][subField] = value;
+      } else {
+        // Handle direct fields
+        if (!newData[section]) newData[section] = {};
+        newData[section][field] = value;
+      }
+      return newData;
+    });
+  };
+
+  // Handle array field updates (for dimensions, dimension names, etc.)
+  const handleArrayFieldChange = (section, field, value) => {
+    try {
+      // Parse array string (e.g., "256, 256, 12, 5")
+      const arrayValue = value.split(',').map(item => item.trim()).filter(item => item !== '');
+      setFormData(prev => ({
+        ...prev,
+        [section]: {
+          ...prev[section],
+          [field]: arrayValue
+        }
+      }));
+    } catch (error) {
+      console.error('Error parsing array field:', error);
+    }
+  };
+
+  // Handle back button to return to schema selection
+  const handleBackToSchemaSelection = () => {
+    setShowForm(false);
+    setFormData({});
+  };
+
+
 
   // Handle module creation confirmation
   const handleConfirmAddModule = async () => {
@@ -2120,8 +2756,14 @@ const UMDFViewer = () => {
       console.log(`🚀 Loading data for module: ${moduleId}`);
       
       // Call the C++ reader to get module data
-      console.log(`📡 Making request to: /api/module/${moduleId}/data`);
-      const response = await fetch(`/api/module/${moduleId}/data`, {
+      // Get password from session storage for authentication
+      const storedPassword = sessionStorage.getItem('umdf_password');
+      const url = storedPassword 
+        ? `/api/module/${moduleId}/data?password=${encodeURIComponent(storedPassword)}`
+        : `/api/module/${moduleId}/data`;
+      
+      console.log(`📡 Making request to: ${url}`);
+      const response = await fetch(url, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -2811,6 +3453,14 @@ const UMDFViewer = () => {
         selectedSchema={selectedSchema}
         onSchemaChange={handleSchemaChange}
         onConfirm={handleConfirmAddModule}
+        onSchemaConfirm={handleSchemaConfirm}
+        showForm={showForm}
+        formData={formData}
+        onFormFieldChange={handleFormFieldChange}
+        onArrayFieldChange={handleArrayFieldChange}
+        onBackToSchemaSelection={handleBackToSchemaSelection}
+        onFormConfirm={handleConfirmAddModule}
+        parsedSchema={parsedSchema}
       />
     </div>
   );
