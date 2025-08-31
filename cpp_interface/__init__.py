@@ -11,17 +11,17 @@ if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
 try:
-    import umdf_reader
-    print("✓ Successfully imported umdf_reader module")
+    import umdf
+    print("✓ Successfully imported umdf module")
 except ImportError as e:
-    print(f"✗ Failed to import umdf_reader: {e}")
+    print(f"✗ Failed to import umdf: {e}")
     raise
 
 # Re-export the main classes
-Reader = umdf_reader.Reader
-Writer = umdf_reader.Writer
-ModuleData = umdf_reader.ModuleData
-UUID = umdf_reader.UUID
-Result = umdf_reader.Result
+Reader = umdf.Reader
+Writer = umdf.Writer
+ModuleData = umdf.ModuleData
+UUID = umdf.UUID
+Result = umdf.Result
 
 __all__ = ['Reader', 'Writer', 'ModuleData', 'UUID', 'Result']

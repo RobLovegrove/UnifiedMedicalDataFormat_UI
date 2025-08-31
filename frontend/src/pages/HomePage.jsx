@@ -83,6 +83,54 @@ const HomePage = () => {
     }
   }, []);
 
+  // Check authentication status with backend
+  useEffect(() => {
+    const checkAuthWithBackend = async () => {
+      try {
+        const response = await fetch('/api/check-auth');
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        if (!result.authenticated) {
+          console.log('🔒 Backend authentication lost - showing login modal');
+          // Clear session storage since backend has no credentials
+          sessionStorage.removeItem('umdf_username');
+          sessionStorage.removeItem('umdf_password');
+          setShowLoginModal(true);
+        } else {
+          console.log('✅ Backend authentication confirmed');
+          // If backend has credentials but frontend doesn't, sync them
+          const storedUsername = sessionStorage.getItem('umdf_username');
+          const storedPassword = sessionStorage.getItem('umdf_password');
+          
+          if (!storedUsername || !storedPassword) {
+            console.log('🔄 Syncing frontend credentials with backend');
+            // We can't get the actual password from backend for security, so just show login modal
+            setShowLoginModal(true);
+          }
+        }
+      } catch (error) {
+        console.error('❌ Error checking backend authentication:', error);
+        // If we can't reach the backend, assume authentication is lost
+        console.log('🔒 Cannot reach backend - showing login modal');
+        sessionStorage.removeItem('umdf_username');
+        sessionStorage.removeItem('umdf_password');
+        setShowLoginModal(true);
+      }
+    };
+
+    // Check auth immediately
+    checkAuthWithBackend();
+    
+    // Check auth every 30 seconds
+    const authInterval = setInterval(checkAuthWithBackend, 30000);
+    
+    return () => clearInterval(authInterval);
+  }, []);
+
   const handleLogin = async () => {
     if (username.trim() && password.trim()) {
       try {

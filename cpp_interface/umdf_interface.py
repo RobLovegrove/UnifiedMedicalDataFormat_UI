@@ -11,18 +11,18 @@ from typing import Dict, List, Any, Optional, Union
 
 # Import the main UMDF module
 try:
-    import umdf_reader
-    print("✓ Successfully imported umdf_reader module")
+    import umdf
+    print("✓ Successfully imported umdf module")
 except ImportError as e:
-    print(f"✗ Failed to import umdf_reader: {e}")
-    print("Make sure to run: pip install -e . from the cpp_interface directory")
+    print(f"✗ Failed to import umdf: {e}")
+    print("Make sure to run: pip install -e ../UMDF/python_package --force-reinstall")
     sys.exit(1)
 
 class UMDFReader:
     """High-level wrapper for reading UMDF files"""
     
     def __init__(self):
-        self.reader = umdf_reader.Reader()
+        self.reader = umdf.Reader()
         self.current_file = None
     
     def read_file(self, filepath: str, password: str = "") -> bool:
@@ -81,7 +81,7 @@ class UMDFReader:
         
         try:
             # Convert string module_id to UUID if needed
-            uuid_obj = umdf_reader.UUID(module_id) if isinstance(module_id, str) else module_id
+            uuid_obj = umdf.UUID.fromString(module_id) if isinstance(module_id, str) else module_id
             result = self.reader.getAuditTrail(uuid_obj)
             
             if result.has_value():
@@ -133,7 +133,7 @@ class UMDFWriter:
     """High-level wrapper for writing UMDF files"""
     
     def __init__(self):
-        self.writer = umdf_reader.Writer()
+        self.writer = umdf.Writer()
         self.current_file = None
     
     def open_file(self, filename: str, author: str, password: str = "") -> bool:
@@ -182,14 +182,67 @@ class UMDFWriter:
             print(f"Error creating encounter: {e}")
             return None
     
-    def add_module_to_encounter(self, encounter_id: str, schema_path: str, module_data: umdf_reader.ModuleData) -> Optional[str]:
+    def add_module_to_encounter(self, encounter_id: str, schema_path: str, metadata: dict, data: list, author: str = None) -> Optional[str]:
         """Add a module to an encounter"""
         if not self.current_file:
             raise RuntimeError("No file open. Call create_new_file() first.")
         
         try:
             # Convert string encounter_id to UUID if needed
-            uuid_obj = umdf_reader.UUID(encounter_id) if isinstance(encounter_id, str) else encounter_id
+            try:
+                if isinstance(encounter_id, str):
+                    # Use the fromString static method
+                    uuid_obj = umdf.UUID.fromString(encounter_id)
+                    print(f"=== DEBUG: Successfully created UUID from string using fromString: {encounter_id}")
+                else:
+                    uuid_obj = encounter_id
+                    print(f"=== DEBUG: Using existing UUID object: {encounter_id}")
+            except Exception as uuid_error:
+                print(f"=== DEBUG: Error creating UUID from string '{encounter_id}': {uuid_error}")
+                print(f"=== DEBUG: UUID fromString error type: {type(uuid_error)}")
+                # Try to pass the string directly to the C++ method
+                print(f"=== DEBUG: Attempting to pass string directly to addModuleToEncounter")
+                uuid_obj = encounter_id
+            
+            # Try to create a ModuleData object from the raw data
+            try:
+                # Create a new ModuleData object
+                print(f"=== DEBUG: Attempting to create ModuleData object")
+                module_data = umdf.ModuleData()
+                print(f"=== DEBUG: Successfully created ModuleData object: {module_data}")
+                
+                # Set the metadata and data
+                if hasattr(module_data, 'set_metadata'):
+                    module_data.set_metadata(metadata)
+                elif hasattr(module_data, 'setMetadata'):
+                    module_data.setMetadata(metadata)
+                
+                if hasattr(module_data, 'set_tabular_data'):
+                    module_data.set_tabular_data(data)
+                elif hasattr(module_data, 'setTabularData'):
+                    module_data.setTabularData(data)
+                
+                # Set author if available
+                if author and hasattr(module_data, 'set_author'):
+                    module_data.set_author(author)
+                elif author and hasattr(module_data, 'setAuthor'):
+                    module_data.setAuthor(author)
+                    
+            except Exception as create_error:
+                print(f"=== DEBUG: Error creating ModuleData object: {create_error} ===")
+                print(f"=== DEBUG: ModuleData attributes: {dir(umdf.ModuleData) if hasattr(umdf, 'ModuleData') else 'No ModuleData'}")
+                # If we can't create a ModuleData object, try to pass the raw data
+                # This might work if the C++ method accepts different parameter types
+                module_data = {
+                    'metadata': metadata,
+                    'data': data,
+                    'author': author
+                }
+            
+            print(f"=== DEBUG: Calling addModuleToEncounter with:")
+            print(f"=== DEBUG:   uuid_obj: {uuid_obj} (type: {type(uuid_obj)})")
+            print(f"=== DEBUG:   schema_path: {schema_path}")
+            print(f"=== DEBUG:   module_data: {module_data} (type: {type(module_data)})")
             result = self.writer.addModuleToEncounter(uuid_obj, schema_path, module_data)
             
             if result.has_value():
@@ -279,8 +332,8 @@ __all__ = [
 ]
 
 # Also export the raw C++ classes for advanced usage
-Reader = umdf_reader.Reader
-Writer = umdf_reader.Writer
-ModuleData = umdf_reader.ModuleData
-UUID = umdf_reader.UUID
-Result = umdf_reader.Result 
+Reader = umdf.Reader
+Writer = umdf.Writer
+ModuleData = umdf.ModuleData
+UUID = umdf.UUID
+Result = umdf.Result 
