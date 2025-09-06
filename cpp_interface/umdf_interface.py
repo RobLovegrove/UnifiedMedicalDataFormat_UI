@@ -182,6 +182,59 @@ class UMDFWriter:
             print(f"Error creating encounter: {e}")
             return None
     
+    def add_variant_module(self, parent_module_id: str, schema_path: str, metadata: dict, data: list, author: str = None) -> Optional[str]:
+        """Add a variant module to a parent module"""
+        if not self.current_file:
+            raise RuntimeError("No file open. Call create_new_file() first.")
+        
+        try:
+            # Convert string parent_module_id to UUID if needed
+            try:
+                if isinstance(parent_module_id, str):
+                    uuid_obj = umdf.UUID.fromString(parent_module_id)
+                else:
+                    uuid_obj = parent_module_id
+            except Exception as uuid_error:
+                print(f"Error creating UUID from string '{parent_module_id}': {uuid_error}")
+                return None
+            
+            # Create a ModuleData object
+            try:
+                module_data = umdf.ModuleData()
+                
+                # Set the metadata and data
+                if hasattr(module_data, 'set_metadata'):
+                    module_data.set_metadata(metadata)
+                elif hasattr(module_data, 'setMetadata'):
+                    module_data.setMetadata(metadata)
+                
+                if hasattr(module_data, 'set_tabular_data'):
+                    module_data.set_tabular_data(data)
+                elif hasattr(module_data, 'setTabularData'):
+                    module_data.setTabularData(data)
+                
+                # Set author if available
+                if author and hasattr(module_data, 'set_author'):
+                    module_data.set_author(author)
+                elif author and hasattr(module_data, 'setAuthor'):
+                    module_data.setAuthor(author)
+                    
+            except Exception as create_error:
+                print(f"Error creating ModuleData object: {create_error}")
+                return None
+            
+            result = self.writer.addVariantModule(uuid_obj, schema_path, module_data)
+            
+            if result.has_value():
+                module_id = result.value()
+                return str(module_id)
+            else:
+                print(f"Failed to add variant module: {result.error()}")
+                return None
+        except Exception as e:
+            print(f"Error adding variant module: {e}")
+            return None
+
     def add_module_to_encounter(self, encounter_id: str, schema_path: str, metadata: dict, data: list, author: str = None) -> Optional[str]:
         """Add a module to an encounter"""
         if not self.current_file:

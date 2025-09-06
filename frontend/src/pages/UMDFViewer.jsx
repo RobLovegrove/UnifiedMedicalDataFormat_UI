@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import ProcessingModal from '../components/ProcessingModal';
 import CustomSlider from '../components/CustomSlider';
 import './UMDFViewer.css';
@@ -449,14 +449,18 @@ const AddModuleModal = ({
       console.log('  webkitRelativePath:', selectedDicomFolder.webkitRelativePath);
       console.log('  webkitRelativePath parts:', selectedDicomFolder.webkitRelativePath.split('/'));
       
-      // Since we're using a hardcoded path in the backend for testing,
-      // just send any folder path - the backend will ignore it anyway
+      // Extract the folder name from the webkitRelativePath
+      // webkitRelativePath format: "FolderName/file1.dcm", "FolderName/file2.dcm", etc.
+      const webkitPath = selectedDicomFolder.webkitRelativePath;
+      const folderName = webkitPath.split('/')[0]; // Get the first part (folder name)
+      
       console.log('🔍 Folder selection details:');
       console.log('  selectedDicomFolder:', selectedDicomFolder);
-      console.log('  webkitRelativePath:', selectedDicomFolder.webkitRelativePath);
+      console.log('  webkitRelativePath:', webkitPath);
+      console.log('  extracted folderName:', folderName);
       
-      // Send a dummy path since backend uses hardcoded path
-      formData.append('folder_path', 'dummy_path_for_testing');
+      // Send the folder name to be appended to the base path in the backend
+      formData.append('folder_name', folderName);
       formData.append('encounter_id', encounterId);
       
       setConversionProgress('Decompressing pixel data...');
@@ -1092,7 +1096,8 @@ const AddModuleModal = ({
                     style={{ border: '2px solid #dee2e6' }}
                   />
                   <small className="text-muted">
-                    Select a folder containing DICOM files (.dcm)
+                    Select a folder containing DICOM files (.dcm). 
+                    The folder will be imported from: <code>/Users/rob/Documents/CS/Dissertation/DICOM images/Test Image/</code>
                   </small>
                 </div>
 
@@ -1844,6 +1849,8 @@ const DynamicForm = ({
 };
 
 const UMDFViewer = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [modules, setModules] = useState([]);
   const [encounters, setEncounters] = useState([]);
   const [moduleGraph, setModuleGraph] = useState({});
@@ -1853,7 +1860,7 @@ const UMDFViewer = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMessage, setProcessingMessage] = useState('');
   const [sliderValues, setSliderValues] = useState({}); // Track slider values for each module
-  const [selectedDerivedModules, setSelectedDerivedModules] = useState({}); // Track which derived module is selected for each base module
+  const [selectedVariantModules, setSelectedVariantModules] = useState({}); // Track which variant module is selected for each base module
 
   const [fileInputRef] = useState(React.createRef()); // Track which image module is currently displayed
   const [isEditMode, setIsEditMode] = useState(false); // Track whether we're in edit mode
@@ -2063,108 +2070,38 @@ const UMDFViewer = () => {
   useEffect(() => {
     const processFile = async () => {
       const fileReady = sessionStorage.getItem('umdf_file_ready');
-      const fileData = sessionStorage.getItem('umdf_file_data');
       
-      if (fileReady === 'true' && fileData) {
-        // Clear any old module metadata when processing a new file
-        sessionStorage.removeItem('umdf_modules_metadata');
+      if (fileReady === 'true') {
+        // Check if file was passed via navigation state
+        const file = location.state?.file;
         
-        setIsProcessing(true);
-        setProcessingMessage('Processing UMDF file...');
-        
-        try {
-          // Convert base64 data back to file object
-          const base64Response = await fetch(fileData);
-          const fileBlob = await base64Response.blob();
+        if (file) {
+          // File was passed via navigation state
+          console.log('📁 Processing file from navigation state:', file.name);
           
-          // Create FormData for upload
-          const formData = new FormData();
-          formData.append('file', fileBlob, sessionStorage.getItem('umdf_file_name'));
+          // Clear any old module metadata when processing a new file
+          sessionStorage.removeItem('umdf_modules_metadata');
           
-          // Add password from session storage
-          const storedPassword = sessionStorage.getItem('umdf_password');
-          if (storedPassword) {
-            formData.append('password', storedPassword);
-          }
+          setIsProcessing(true);
+          setProcessingMessage('Processing UMDF file...');
           
-          // Send to backend for C++ processing
-          const response = await fetch('/api/upload/umdf', {
-            method: 'POST',
-            body: formData
-          });
-          
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-          
-          const result = await response.json();
-          
-          // Debug: Log what we received from the backend
-          console.log('🔍 DEBUG: Backend response:', result);
-          console.log('🔍 DEBUG: Modules received:', result.modules);
-          if (result.modules && result.modules.length > 0) {
-            console.log('🔍 DEBUG: First module schema_path:', result.modules[0].schema_path);
-          }
-          
-          if (result.success) {
-            // Store only essential module metadata in sessionStorage (not full image data)
-            const modulesForStorage = result.modules.map(module => ({
-              id: module.id,
-              name: module.name,
-              schema_id: module.schema_id,
-              schema_path: module.schema_path,  // Add schema_path to stored metadata
-              type: module.type,
-              schema_url: module.schema_url,
-              metadata: module.metadata,
-              version: module.version,
-              created: module.created,
-              dimensions: module.dimensions,
-              // Don't store pixel_data or large data arrays in sessionStorage
-              has_data: !!module.data,
-              data_summary: module.data ? `Data with ${Object.keys(module.data).length} fields` : 'No data',
-              has_pixel_data: !!module.pixel_data,
-              pixel_data_summary: module.pixel_data ? `Pixel data available (${module.dimensions?.join('x') || 'unknown dimensions'})` : 'No pixel data'
-            }));
+          try {
+            // Get password from session storage (same one used from home page)
+            const storedPassword = sessionStorage.getItem('umdf_password');
+            console.log('🔄 Retrieved password from sessionStorage:', storedPassword ? 'Password found' : 'No password');
             
-            try {
-              sessionStorage.setItem('umdf_modules_metadata', JSON.stringify(modulesForStorage));
-              console.log('Stored module metadata in sessionStorage');
-            } catch (storageError) {
-              console.warn('Could not store module metadata in sessionStorage:', storageError);
-              // Continue without storing in sessionStorage
-            }
+            // Process the file using the reusable function
+            await processFileData(file, storedPassword);
             
-            // Debug: Log what modules we're setting in state
-            console.log('🔍 DEBUG: Setting modules in state:', result.modules);
-            result.modules.forEach((module, index) => {
-              console.log(`  Module ${index}: id=${module.id}, name="${module.name}", type=${module.type}`);
-            });
-            
-            // Set full modules, encounters, and module graph in component state
-            setModules(result.modules);
-            setEncounters(result.encounters || []);
-            setModuleGraph(result.module_graph || {});
-            setShowSuccessBar(true);
-            
-            // Clear processing state
+          } catch (error) {
+            console.error('Error processing file from navigation state:', error);
+            setProcessingMessage('Error processing file. Please try again.');
             setIsProcessing(false);
-            setProcessingMessage('');
-            
-            // Clear file data from sessionStorage (keep module metadata)
-            sessionStorage.removeItem('umdf_file_ready');
-            sessionStorage.removeItem('umdf_file_data');
-            
-            // Auto-hide success bar after 3 seconds
-            setTimeout(() => setShowSuccessBar(false), 3000);
-          } else {
-            throw new Error(result.error || 'Failed to process file');
           }
-        } catch (error) {
-          console.error('Error processing file:', error);
-          setErrorMessage(`Error processing file: ${error.message}`);
-          setShowErrorBar(true);
+        } else {
+          console.log('❌ No file found in navigation state');
+          setProcessingMessage('No file to process. Please select a file from the home page.');
           setIsProcessing(false);
-          setProcessingMessage('');
         }
       } else {
         // Check if we have existing module metadata from previous session
@@ -2193,7 +2130,7 @@ const UMDFViewer = () => {
     };
 
     processFile();
-  }, []);
+  }, [location]);
 
   // Check authentication status periodically
   useEffect(() => {
@@ -2237,7 +2174,6 @@ const UMDFViewer = () => {
     sessionStorage.removeItem('umdf_file_name');
     sessionStorage.removeItem('umdf_file_size');
     sessionStorage.removeItem('umdf_file_last_modified');
-    sessionStorage.removeItem('umdf_file_data');
     sessionStorage.removeItem('umdf_file_ready');
     setModules([]);
     setEncounters([]);
@@ -2331,9 +2267,9 @@ const UMDFViewer = () => {
 
   // Render imaging module with image viewer and sliders
   const renderImagingModule = (module, moduleNode = null) => {
-    // Check if this module has a selected derived module
-    const selectedDerivedId = selectedDerivedModules[module.id];
-    const currentModule = selectedDerivedId ? modules.find(m => m.id === selectedDerivedId) : module;
+    // Check if this module has a selected variant module
+    const selectedVariantId = selectedVariantModules[module.id];
+    const currentModule = selectedVariantId ? modules.find(m => m.id === selectedVariantId) : module;
     
     if (!currentModule) {
       console.log('No current module found for base module:', module.id);
@@ -2400,9 +2336,12 @@ const UMDFViewer = () => {
     const totalPixels = width * height;
     
     const numDimensions = dimensions.length;
+    // Check if we have meaningful extra dimensions (greater than 1)
+    const hasExtraDimensions = numDimensions > 2 && dimensions.slice(2).some(dim => dim > 1);
+    
     // Calculate number of frames: if only 2 dimensions (width, height), then 1 frame
     // Otherwise, multiply all dimensions after the first 2 (width, height)
-    const numFrames = numDimensions > 2 ? dimensions.slice(2).reduce((acc, dim) => acc * dim, 1) : 1;
+    const numFrames = hasExtraDimensions ? dimensions.slice(2).reduce((acc, dim) => acc * dim, 1) : 1;
     
     console.log('=== IMAGE MODULE DEBUG ===');
     console.log('Metadata structure:', currentModule.metadata);
@@ -2447,17 +2386,17 @@ const UMDFViewer = () => {
       <div className="imaging-module">
         <div className="bg-white p-3 rounded mt-3">
         <div className="row">
-          {/* Derived Image Module Buttons */}
-          {moduleNode && moduleNode.derives && moduleNode.derives.length > 0 && (() => {
-            const derivedImageModules = moduleNode.derives
-              .map(derived => modules.find(m => m.id === derived.id))
-              .filter(derivedModule => derivedModule && derivedModule.type === 'image');
+          {/* Variant Image Module Buttons */}
+          {moduleNode && moduleNode.variant && moduleNode.variant.length > 0 && (() => {
+            const variantImageModules = moduleNode.variant
+              .map(variant => modules.find(m => m.id === variant.id))
+              .filter(variantModule => variantModule && variantModule.type === 'image');
             
-            if (derivedImageModules.length === 0) return null;
+            if (variantImageModules.length === 0) return null;
             
             return (
               <div className="col-md-3">
-                <div className="derived-modules-sidebar" style={{
+                <div className="variant-modules-sidebar" style={{
                   backgroundColor: 'white',
                   padding: '15px',
                   paddingBottom: '25px',
@@ -2477,7 +2416,7 @@ const UMDFViewer = () => {
                                               onClick={async () => {
                           try {
                             // Switch back to the original image module
-                            setSelectedDerivedModules(prev => ({...prev, [module.id]: null}));
+                            setSelectedVariantModules(prev => ({...prev, [module.id]: null}));
                             console.log('Switched to original image module:', module.id);
                           } catch (error) {
                             console.error('Error switching to original module:', error);
@@ -2491,8 +2430,8 @@ const UMDFViewer = () => {
                           textOverflow: 'ellipsis',
                           width: '100%',
                           height: '38px',
-                          backgroundColor: !selectedDerivedModules[module.id] ? '#667eea' : 'transparent',
-                          color: !selectedDerivedModules[module.id] ? 'white' : '#667eea',
+                          backgroundColor: !selectedVariantModules[module.id] ? '#667eea' : 'transparent',
+                          color: !selectedVariantModules[module.id] ? 'white' : '#667eea',
                           border: '1px solid #667eea'
                         }}
                     >
@@ -2500,27 +2439,27 @@ const UMDFViewer = () => {
                       {module.name || module.type} (Original)
                     </button>
                     
-                    {/* Derived Image Module Buttons */}
-                    {derivedImageModules.map((derivedModule, idx) => (
+                    {/* Variant Image Module Buttons */}
+                    {variantImageModules.map((variantModule, idx) => (
                       <button
                         key={idx}
                         className="btn btn-sm w-100"
                         onClick={async () => {
                           try {
-                            // Load the derived module's data first if it hasn't been loaded
-                            if (!derivedModule.data || Object.keys(derivedModule.data).length === 0) {
-                              console.log('Loading data for derived module:', derivedModule.id);
-                              await loadModule(derivedModule.id);
+                            // Load the variant module's data first if it hasn't been loaded
+                            if (!variantModule.data || Object.keys(variantModule.data).length === 0) {
+                              console.log('Loading data for variant module:', variantModule.id);
+                              await loadModule(variantModule.id);
                             }
                             
-                            // Switch to the derived image module for this specific base module
-                            setSelectedDerivedModules(prev => ({...prev, [module.id]: derivedModule.id}));
-                            console.log('Switched to derived image module:', derivedModule.id, 'for base module:', module.id);
+                            // Switch to the variant image module for this specific base module
+                            setSelectedVariantModules(prev => ({...prev, [module.id]: variantModule.id}));
+                            console.log('Switched to variant image module:', variantModule.id, 'for base module:', module.id);
                           } catch (error) {
-                            console.error('Error switching to derived module:', error);
+                            console.error('Error switching to variant module:', error);
                           }
                         }}
-                        title={`Switch to ${derivedModule.name || derivedModule.type} Module`}
+                        title={`Switch to ${variantModule.name || variantModule.type} Module`}
                         style={{
                           fontSize: '0.8rem',
                           whiteSpace: 'nowrap',
@@ -2528,13 +2467,13 @@ const UMDFViewer = () => {
                           textOverflow: 'ellipsis',
                           width: '100%',
                           height: '38px',
-                          backgroundColor: selectedDerivedModules[module.id] === derivedModule.id ? '#667eea' : 'transparent',
-                          color: selectedDerivedModules[module.id] === derivedModule.id ? 'white' : '#667eea',
+                          backgroundColor: selectedVariantModules[module.id] === variantModule.id ? '#667eea' : 'transparent',
+                          color: selectedVariantModules[module.id] === variantModule.id ? 'white' : '#667eea',
                           border: '1px solid #667eea'
                         }}
                       >
                         <i className="fas fa-image me-1"></i>
-                        {derivedModule.name || derivedModule.type}
+                        {variantModule.name || variantModule.type}
                       </button>
                     ))}
                   </div>
@@ -2590,7 +2529,7 @@ const UMDFViewer = () => {
                 // Calculate which frame to display based on current slider values
                 let currentFrameIndex = 0;
                 
-                if (numDimensions > 2) {
+                if (hasExtraDimensions) {
                   // Get current slider values for dimensions beyond width/height from state
                   const currentSliderValues = [];
                   for (let i = 2; i < numDimensions; i++) {
@@ -3159,7 +3098,7 @@ const UMDFViewer = () => {
                           Expected: {totalPixels}
                         </small>
                       </div>
-                      {numDimensions > 2 && (
+                      {hasExtraDimensions && (
                         <div className="mt-1 mb-3">
                           <small className="text-muted">
                                                     Current slider positions: {(() => {
@@ -3190,7 +3129,7 @@ const UMDFViewer = () => {
             </div>
           </div>
           
-          {numDimensions > 2 && (
+          {hasExtraDimensions && (
             <div className="col-md-3">
               <div className="dimension-controls" style={{width: '100%'}}>
                 {dimensions.slice(2).map((dim, index) => {
@@ -3278,8 +3217,9 @@ const UMDFViewer = () => {
                     if (contentItem.image_structure && contentItem.image_structure.dimensions) {
                       const dimensions = contentItem.image_structure.dimensions;
                       const numDimensions = dimensions.length;
+                      const hasExtraDimensions = numDimensions > 2 && dimensions.slice(2).some(dim => dim > 1);
                       
-                      if (numDimensions > 2) {
+                      if (hasExtraDimensions) {
                         // Get current slider values for dimensions beyond width/height
                         const currentSliderValues = [];
                         for (let i = 2; i < numDimensions; i++) {
@@ -3329,7 +3269,8 @@ const UMDFViewer = () => {
                               if (contentItem.image_structure && contentItem.image_structure.dimensions) {
                                 const dimensions = contentItem.image_structure.dimensions;
                                 const numDimensions = dimensions.length;
-                                if (numDimensions > 2) {
+                                const hasExtraDimensions = numDimensions > 2 && dimensions.slice(2).some(dim => dim > 1);
+                                if (hasExtraDimensions) {
                                   const sliderInfo = [];
                                   for (let i = 2; i < numDimensions; i++) {
                                     const key = `${currentModule.id || 'unknown'}_${i}`;
@@ -3463,19 +3404,19 @@ const UMDFViewer = () => {
                         </div>
                       </div>
                       
-                      {/* Derived Modules */}
-                      {moduleNode.derives && moduleNode.derives.length > 0 && (
+                      {/* Variant Modules */}
+                      {moduleNode.variant && moduleNode.variant.length > 0 && (
                         <div className="mb-4 text-center">
                           <h6 className="text-success mb-3">
                             <i className="fas fa-arrow-down me-2"></i>
-                            Derived Modules:
+                            Variant Modules:
                           </h6>
                           <div className="list-group" style={{maxWidth: '80%', margin: '0 auto'}}>
-                            {moduleNode.derives.map((derived, idx) => {
-                              const derivedModule = modules.find(m => m.id === derived.id);
+                            {moduleNode.variant.map((variant, idx) => {
+                              const variantModule = modules.find(m => m.id === variant.id);
                               return (
                                 <div key={idx} className="list-group-item list-group-item-success text-center">
-                                  <strong>{derivedModule?.type || 'Unknown'}</strong> - {derived.id}
+                                  <strong>{variantModule?.type || 'Unknown'}</strong> - {variant.id}
                                 </div>
                               );
                             })}
@@ -3732,7 +3673,7 @@ const UMDFViewer = () => {
       console.log('🔄 Change File: Resetting frontend state...');
       setModules([]);
       setEncounters([]);
-      setSelectedDerivedModules({});
+      setSelectedVariantModules({});
       setSliderValues({});
       setModuleGraph({});
       setIsEditMode(false); // Reset edit mode when changing files
@@ -4890,14 +4831,13 @@ const UMDFViewer = () => {
                               sessionStorage.removeItem('umdf_password');
                               sessionStorage.removeItem('umdf_modules_metadata');
                               sessionStorage.removeItem('umdf_file_ready');
-                              sessionStorage.removeItem('umdf_file_data');
                               sessionStorage.removeItem('umdf_file_name');
                               
                               // Clear all component state
                               console.log('🔄 Change User: Clearing component state...');
                               setModules([]);
                               setEncounters([]);
-                              setSelectedDerivedModules({});
+                              setSelectedVariantModules({});
                               setSliderValues({});
                               setModuleGraph({});
                               setIsProcessing(false);

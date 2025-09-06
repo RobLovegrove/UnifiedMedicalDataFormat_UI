@@ -245,17 +245,13 @@ const HomePage = () => {
       sessionStorage.setItem('umdf_file_path', filePath);
       console.log('📁 Stored file path for editing:', filePath);
       
-      // Store the actual file object for processing
-      // Convert file to base64 for storage (sessionStorage can't store File objects directly)
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64Data = reader.result;
-        sessionStorage.setItem('umdf_file_data', base64Data);
-        sessionStorage.setItem('umdf_file_ready', 'true');
-        // Navigate to viewer after file is loaded
-        navigate('/umdf-viewer');
-      };
-      reader.readAsDataURL(file);
+      // Store file metadata only (not the file data itself)
+      sessionStorage.setItem('umdf_file_ready', 'true');
+      sessionStorage.setItem('umdf_file_name', file.name);
+      sessionStorage.setItem('umdf_file_size', file.size.toString());
+      sessionStorage.setItem('umdf_file_last_modified', file.lastModified.toString());
+      // Navigate to viewer - the file will be passed directly
+      navigate('/umdf-viewer', { state: { file: file } });
     } else {
       // For non-UMDF files, show file info on this page
       setShowFileInfo(true);
@@ -285,17 +281,13 @@ const HomePage = () => {
         sessionStorage.setItem('umdf_file_path', file.name);
         console.log('📁 Stored filename as fallback for editing:', file.name);
         
-        // Store the actual file object for processing
-        // Convert file to base64 for storage (sessionStorage can't store File objects directly)
-        const reader = new FileReader();
-        reader.onload = () => {
-          const base64Data = reader.result;
-          sessionStorage.setItem('umdf_file_data', base64Data);
-          sessionStorage.setItem('umdf_file_ready', 'true');
-          // Navigate to viewer after file is loaded
-          navigate('/umdf-viewer');
-        };
-        reader.readAsDataURL(file);
+        // Store file metadata only (not the file data itself)
+        sessionStorage.setItem('umdf_file_ready', 'true');
+        sessionStorage.setItem('umdf_file_name', file.name);
+        sessionStorage.setItem('umdf_file_size', file.size.toString());
+        sessionStorage.setItem('umdf_file_last_modified', file.lastModified.toString());
+        // Navigate to viewer - the file will be passed directly
+        navigate('/umdf-viewer', { state: { file: file } });
       } else {
         // For non-UMDF files, show file info on this page
         setShowFileInfo(true);

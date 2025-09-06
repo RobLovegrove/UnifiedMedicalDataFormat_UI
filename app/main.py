@@ -949,7 +949,7 @@ async def create_module(
 
 @app.post("/api/import-dicom")
 async def import_dicom(
-    folder_path: str = Form(...),
+    folder_name: str = Form(...),
     encounter_id: str = Form(...)
 ):
     """Import DICOM folder and convert to UMDF format."""
@@ -962,26 +962,32 @@ async def import_dicom(
         if not DICOM_CONVERTER_AVAILABLE:
             raise HTTPException(status_code=500, detail="DICOM converter not available")
         
-        print(f"=== DEBUG: Starting DICOM import for folder: {folder_path} ===")
+        print(f"=== DEBUG: Starting DICOM import for folder name: {folder_name} ===")
         print(f"=== DEBUG: Encounter ID: {encounter_id} ===")
-        print(f"=== DEBUG: Folder path type: {type(folder_path)} ===")
-        print(f"=== DEBUG: Folder path length: {len(folder_path)} ===")
-        print(f"=== DEBUG: Folder path ends with .dcm: {folder_path.endswith('.dcm')} ===")
-        print(f"=== DEBUG: Folder path contains 'Test Image': {'Test Image' in folder_path} ===")
+        
+        # Construct the full path by appending folder_name to the base path
+        base_path = "/Users/rob/Documents/CS/Dissertation/UMDF_UI/test_images"
+        full_folder_path = os.path.join(base_path, folder_name)
+        
+        print(f"=== DEBUG: Base path: '{base_path}' ===")
+        print(f"=== DEBUG: Selected folder name: '{folder_name}' ===")
+        print(f"=== DEBUG: Full folder path: '{full_folder_path}' ===")
+        
+        # Validate the path is within the allowed base directory
+        if not os.path.commonpath([full_folder_path]).startswith(os.path.commonpath([base_path])):
+            raise HTTPException(status_code=400, detail="Invalid folder path")
+        
+        # Check if the folder exists
+        if not os.path.exists(full_folder_path):
+            raise HTTPException(status_code=400, detail=f"Folder '{folder_name}' not found in base directory")
         
         # Initialize DICOM converter
         converter = DICOMConverter()
         
         # Convert the DICOM folder
         print("=== DEBUG: Converting DICOM folder... ===")
-        
-        # HARDCODED PATH FOR TESTING
-        hardcoded_path = "/Users/rob/Documents/CS/Dissertation/DICOM images/Test Image/Topogram  1.0  Tr20-45605"
-        print(f"=== DEBUG: Using hardcoded path: '{hardcoded_path}' ===")
-        print(f"=== DEBUG: Original folder_path was: '{folder_path}' ===")
-        
-        print(f"=== DEBUG: About to call converter.convert_folder with: '{hardcoded_path}' ===")
-        umdf_data = converter.convert_folder(hardcoded_path)
+        print(f"=== DEBUG: About to call converter.convert_folder with: '{full_folder_path}' ===")
+        umdf_data = converter.convert_folder(full_folder_path)
         
         print("=== DEBUG: Raw converter output structure ===")
         print(f"  Top level keys: {list(umdf_data.keys())}")

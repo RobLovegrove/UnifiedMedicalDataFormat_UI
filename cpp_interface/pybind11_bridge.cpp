@@ -46,8 +46,8 @@ public:
         return writer.addModuleToEncounter(encounterId, schemaPath, module);
     }
     
-    std::expected<UUID, std::string> addDerivedModule(const UUID& parentModuleId, const std::string& schemaPath, const ModuleData& module) {
-        return writer.addDerivedModule(parentModuleId, schemaPath, module);
+    std::expected<UUID, std::string> addVariantModule(const UUID& parentModuleId, const std::string& schemaPath, const ModuleData& module) {
+        return writer.addVariantModule(parentModuleId, schemaPath, module);
     }
     
     std::expected<UUID, std::string> addAnnotation(const UUID& parentModuleId, const std::string& schemaPath, const ModuleData& module) {
@@ -128,7 +128,7 @@ PYBIND11_MODULE(umdf_cpp, m) {
         .def("update_module", &PyWriter::updateModule)
         .def("create_new_encounter", &PyWriter::createNewEncounter)
         .def("add_module_to_encounter", &PyWriter::addModuleToEncounter)
-        .def("add_derived_module", &PyWriter::addDerivedModule)
+        .def("add_variant_module", &PyWriter::addVariantModule)
         .def("add_annotation", &PyWriter::addAnnotation)
         .def("closeFile", &PyWriter::closeFile);
     
