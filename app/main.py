@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import json
 import os
+import re
 import sys
 from typing import List
 
@@ -754,7 +755,9 @@ async def save_file():
 async def create_module(
     encounter_id: str = Form(...),
     schema_path: str = Form(...),
-    module_data: str = Form(...)  # JSON string containing metadata and data
+    module_data: str = Form(...),  # JSON string containing metadata and data
+    parent_module_id: str = Form(None),  # Optional parent module ID for variants/annotations
+    relationship_type: str = Form(None)  # Optional relationship type
 ):
     """Create a new module and add it to an encounter."""
     try:
@@ -774,6 +777,10 @@ async def create_module(
         
         print(f"=== DEBUG: Creating module for encounter: {encounter_id} ===")
         print(f"=== DEBUG: Schema path: {schema_path} ===")
+        print(f"=== DEBUG: Parent module ID: {parent_module_id} ===")
+        print(f"=== DEBUG: Relationship type: {relationship_type} ===")
+        print(f"=== DEBUG: Parent module ID type: {type(parent_module_id)} ===")
+        print(f"=== DEBUG: Parent module ID length: {len(parent_module_id) if parent_module_id else 'None'} ===")
         print(f"=== DEBUG: Metadata: {metadata} ===")
         
         # Check if this is an image module that needs frame data processing
@@ -888,15 +895,50 @@ async def create_module(
             encounter_uuid = umdf.UUID.fromString(encounter_id)
             print(f"=== DEBUG: Converted encounter_id '{encounter_id}' to UUID: {encounter_uuid}")
             
-            # Call the writer's addModuleToEncounter method on the raw C++ writer
-            print(f"=== DEBUG: About to call addModuleToEncounter ===")
-            print(f"=== DEBUG: encounter_uuid: {encounter_uuid} ===")
-            print(f"=== DEBUG: schema_path: {schema_path} ===")
-            print(f"=== DEBUG: main_module_data type: {type(main_module_data)} ===")
-            print(f"=== DEBUG: main_module_data attributes: {[attr for attr in dir(main_module_data) if not attr.startswith('_')]} ===")
-            
-            result = umdf_writer.writer.addModuleToEncounter(encounter_uuid, schema_path, main_module_data)
-            print(f"=== DEBUG: Module creation result: {result} ===")
+            # Call the appropriate method based on relationship type
+            if relationship_type == 'variant' and parent_module_id:
+                print(f"=== DEBUG: Creating variant module ===")
+                print(f"=== DEBUG: Parent module ID: {parent_module_id} ===")
+                
+                # Validate parent module ID format
+                if len(parent_module_id) != 36 or parent_module_id.count('-') != 4:
+                    raise HTTPException(status_code=400, detail=f"Invalid parent_module_id format: '{parent_module_id}'. Expected UUID format (36 characters with 4 hyphens).")
+                
+                # Convert parent module ID to UUID
+                parent_module_uuid = umdf.UUID.fromString(parent_module_id)
+                print(f"=== DEBUG: Converted parent_module_id '{parent_module_id}' to UUID: {parent_module_uuid}")
+                
+                # Call the C++ method directly with the ModuleData object
+                result = umdf_writer.writer.addVariantModule(parent_module_uuid, schema_path, main_module_data)
+                print(f"=== DEBUG: Variant module creation result: {result} ===")
+                
+            elif relationship_type == 'annotation' and parent_module_id:
+                print(f"=== DEBUG: Creating annotation module ===")
+                print(f"=== DEBUG: Parent module ID: {parent_module_id} ===")
+                
+                # Validate parent module ID format
+                if len(parent_module_id) != 36 or parent_module_id.count('-') != 4:
+                    raise HTTPException(status_code=400, detail=f"Invalid parent_module_id format: '{parent_module_id}'. Expected UUID format (36 characters with 4 hyphens).")
+                
+                # Convert parent module ID to UUID
+                parent_module_uuid = umdf.UUID.fromString(parent_module_id)
+                print(f"=== DEBUG: Converted parent_module_id '{parent_module_id}' to UUID: {parent_module_uuid}")
+                
+                # Call addAnnotationModule (assuming this function exists)
+                result = umdf_writer.add_annotation_module(parent_module_uuid, schema_path, main_module_data)
+                print(f"=== DEBUG: Annotation module creation result: {result} ===")
+                
+            else:
+                # Default: add module to encounter
+                print(f"=== DEBUG: Creating regular module in encounter ===")
+                print(f"=== DEBUG: About to call addModuleToEncounter ===")
+                print(f"=== DEBUG: encounter_uuid: {encounter_uuid} ===")
+                print(f"=== DEBUG: schema_path: {schema_path} ===")
+                print(f"=== DEBUG: main_module_data type: {type(main_module_data)} ===")
+                print(f"=== DEBUG: main_module_data attributes: {[attr for attr in dir(main_module_data) if not attr.startswith('_')]} ===")
+                
+                result = umdf_writer.writer.addModuleToEncounter(encounter_uuid, schema_path, main_module_data)
+                print(f"=== DEBUG: Module creation result: {result} ===")
             
             # Extract the UUID from the ExpectedUUID result
             print(f"=== DEBUG: Result type: {type(result)} ===")
@@ -950,7 +992,9 @@ async def create_module(
 @app.post("/api/import-dicom")
 async def import_dicom(
     folder_name: str = Form(...),
-    encounter_id: str = Form(...)
+    encounter_id: str = Form(None),
+    parent_module_id: str = Form(None),
+    relationship_type: str = Form(None)
 ):
     """Import DICOM folder and convert to UMDF format."""
     try:
@@ -964,6 +1008,8 @@ async def import_dicom(
         
         print(f"=== DEBUG: Starting DICOM import for folder name: {folder_name} ===")
         print(f"=== DEBUG: Encounter ID: {encounter_id} ===")
+        print(f"=== DEBUG: Parent Module ID: {parent_module_id} ===")
+        print(f"=== DEBUG: Relationship Type: {relationship_type} ===")
         
         # Construct the full path by appending folder_name to the base path
         base_path = "/Users/rob/Documents/CS/Dissertation/UMDF_UI/test_images"
@@ -1119,10 +1165,6 @@ async def import_dicom(
                 
                 # Add the module to the encounter
                 try:
-                    # Convert encounter_id string to UUID object
-                    encounter_uuid = umdf.UUID.fromString(encounter_id)
-                    print(f"=== DEBUG: Converted encounter_id '{encounter_id}' to UUID: {encounter_uuid} ===")
-                    
                     # DEBUG: Analyze the pixel data being written
                     print(f"=== DEBUG: PIXEL DATA ANALYSIS BEFORE WRITING ===")
                     print(f"  Number of frames: {len(frame_module_data_list)}")
@@ -1147,12 +1189,69 @@ async def import_dicom(
                     print(f"  Main module data object: {main_module_data}")
                     print(f"  Main module methods: {[m for m in dir(main_module_data) if not m.startswith('_')]}")
                     
-                    # Call the writer's addModuleToEncounter method
-                    print(f"=== DEBUG: About to call addModuleToEncounter ===")
-                    result = umdf_writer.writer.addModuleToEncounter(encounter_uuid, './schemas/image/CT/v1.0.json', main_module_data)
-                    print(f"=== DEBUG: Module creation result: {result} ===")
+                    # Determine which method to call based on parameters
+                    schema_path = './schemas/image/CT/v1.0.json'
+                    
+                    if relationship_type == 'variant' and parent_module_id:
+                        print(f"=== DEBUG: Creating variant module ===")
+                        print(f"=== DEBUG: Parent module ID: {parent_module_id} ===")
+                        
+                        # Validate UUID format
+                        uuid_regex = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
+                        if not uuid_regex.match(parent_module_id):
+                            raise HTTPException(status_code=400, detail="Invalid parent module ID format")
+                        
+                        # Convert parent module ID to UUID
+                        parent_module_uuid = umdf.UUID.fromString(parent_module_id)
+                        print(f"=== DEBUG: Converted parent_module_id '{parent_module_id}' to UUID: {parent_module_uuid}")
+                        
+                        # Call the C++ method directly with the ModuleData object
+                        result = umdf_writer.writer.addVariantModule(parent_module_uuid, schema_path, main_module_data)
+                        
+                        print(f"=== DEBUG: Variant module creation result: {result} ===")
+                        
+                    elif relationship_type == 'annotation' and parent_module_id:
+                        print(f"=== DEBUG: Creating annotation module ===")
+                        print(f"=== DEBUG: Parent module ID: {parent_module_id} ===")
+                        
+                        # Validate UUID format
+                        uuid_regex = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
+                        if not uuid_regex.match(parent_module_id):
+                            raise HTTPException(status_code=400, detail="Invalid parent module ID format")
+                        
+                        # Convert parent module ID to UUID
+                        parent_module_uuid = umdf.UUID.fromString(parent_module_id)
+                        print(f"=== DEBUG: Converted parent_module_id '{parent_module_id}' to UUID: {parent_module_uuid}")
+                        
+                        # Call the C++ method directly with the ModuleData object
+                        result = umdf_writer.writer.addAnnotation(parent_module_uuid, schema_path, main_module_data)
+                        
+                        print(f"=== DEBUG: Annotation module creation result: {result} ===")
+                        
+                    else:
+                        # Default: add module to encounter
+                        print(f"=== DEBUG: Creating regular module in encounter ===")
+                        print(f"=== DEBUG: Encounter ID: {encounter_id} ===")
+                        
+                        # Convert encounter_id string to UUID object (only for regular modules)
+                        if not encounter_id:
+                            raise HTTPException(status_code=400, detail="Encounter ID is required for regular module creation")
+                        
+                        encounter_uuid = umdf.UUID.fromString(encounter_id)
+                        print(f"=== DEBUG: Converted encounter_id '{encounter_id}' to UUID: {encounter_uuid} ===")
+                        print(f"=== DEBUG: About to call addModuleToEncounter ===")
+                        print(f"=== DEBUG: encounter_uuid: {encounter_uuid} ===")
+                        print(f"=== DEBUG: schema_path: {schema_path} ===")
+                        print(f"=== DEBUG: main_module_data type: {type(main_module_data)} ===")
+                        print(f"=== DEBUG: main_module_data attributes: {[attr for attr in dir(main_module_data) if not attr.startswith('_')]} ===")
+                        
+                        result = umdf_writer.writer.addModuleToEncounter(encounter_uuid, schema_path, main_module_data)
+                        print(f"=== DEBUG: Module creation result: {result} ===")
                     
                     # Extract the UUID from the ExpectedUUID result
+                    print(f"=== DEBUG: Result type: {type(result)} ===")
+                    print(f"=== DEBUG: Result attributes: {[attr for attr in dir(result) if not attr.startswith('_')]} ===")
+                    
                     if result and result.has_value():
                         uuid_obj = result.value()
                         module_uuid = uuid_obj.toString()
@@ -1169,7 +1268,7 @@ async def import_dicom(
                         raise HTTPException(status_code=500, detail=f"Failed to create module: {error_msg}")
                         
                 except Exception as writer_error:
-                    print(f"=== DEBUG: Error in writer.addModuleToEncounter: {writer_error} ===")
+                    print(f"=== DEBUG: Error in module creation: {writer_error} ===")
                     raise HTTPException(status_code=500, detail=f"Failed to create module: {writer_error}")
             else:
                 raise HTTPException(status_code=500, detail="No frames found in converted DICOM data")

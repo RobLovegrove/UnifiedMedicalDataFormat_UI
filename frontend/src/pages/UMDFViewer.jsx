@@ -384,7 +384,8 @@ const AddModuleModal = ({
   onClose, 
   encounterId, 
   availableSchemas, 
-  selectedSchema, 
+  selectedSchema,
+  addModuleContext, 
   onSchemaChange, 
   onConfirm,
   onSchemaConfirm,
@@ -461,7 +462,22 @@ const AddModuleModal = ({
       
       // Send the folder name to be appended to the base path in the backend
       formData.append('folder_name', folderName);
-      formData.append('encounter_id', encounterId);
+      
+      // Use the appropriate ID based on context
+      if (addModuleContext?.type === 'variant' || addModuleContext?.type === 'annotation') {
+        formData.append('parent_module_id', addModuleContext.moduleId);
+        formData.append('relationship_type', addModuleContext.type);
+        console.log('🔍 DICOM Import Debug (Variant/Annotation):');
+        console.log('  Folder name:', folderName);
+        console.log('  Parent Module ID:', addModuleContext.moduleId);
+        console.log('  Relationship type:', addModuleContext.type);
+      } else {
+        formData.append('encounter_id', encounterId);
+        console.log('🔍 DICOM Import Debug (Regular Module):');
+        console.log('  Folder name:', folderName);
+        console.log('  Encounter ID:', encounterId);
+        console.log('  Encounter ID type:', typeof encounterId);
+      }
       
       setConversionProgress('Decompressing pixel data...');
       
@@ -499,7 +515,14 @@ const AddModuleModal = ({
 
   // Handle writing converted DICOM data to file
   const handleWriteConvertedData = async () => {
-    if (!convertedData || !encounterId) return;
+    if (!convertedData) return;
+    
+    // Check if we have the required ID based on context
+    if (addModuleContext?.type === 'variant' || addModuleContext?.type === 'annotation') {
+      if (!addModuleContext.moduleId) return;
+    } else {
+      if (!encounterId) return;
+    }
     
     try {
       // Extract the first series data (assuming single series for now)
@@ -616,7 +639,20 @@ const AddModuleModal = ({
       
       // Create FormData for the request
       const formData = new FormData();
-      formData.append('encounter_id', encounterId);
+      
+      // Use the appropriate ID based on context
+      if (addModuleContext?.type === 'variant' || addModuleContext?.type === 'annotation') {
+        formData.append('parent_module_id', addModuleContext.moduleId);
+        formData.append('relationship_type', addModuleContext.type);
+        console.log('🔍 DICOM Write Debug (Variant/Annotation):');
+        console.log('  Parent Module ID:', addModuleContext.moduleId);
+        console.log('  Relationship type:', addModuleContext.type);
+      } else {
+        formData.append('encounter_id', encounterId);
+        console.log('🔍 DICOM Write Debug (Regular Module):');
+        console.log('  Encounter ID:', encounterId);
+      }
+      
       formData.append('schema_path', './schemas/image/CT/v1.0.json');
       formData.append('module_data', JSON.stringify(moduleData));
       
@@ -731,15 +767,22 @@ const AddModuleModal = ({
 
           <div className="modal-body">
             <div className="mb-4">
-              <label className="form-label fw-bold">Encounter ID:</label>
+              <label className="form-label fw-bold">
+                {addModuleContext?.type === 'variant' || addModuleContext?.type === 'annotation' ? 'Parent Module ID:' : 'Encounter ID:'}
+              </label>
               <div className="form-control-plaintext" style={{ 
                 backgroundColor: '#f8f9fa', 
                 padding: '8px 12px', 
                 borderRadius: '4px',
                 fontFamily: 'monospace'
               }}>
-                {encounterId}
+                {addModuleContext?.type === 'variant' || addModuleContext?.type === 'annotation' ? addModuleContext?.moduleId : encounterId}
               </div>
+              <small className="text-muted">
+                {addModuleContext?.type === 'variant' ? 'This variant will be added to the selected module' :
+                 addModuleContext?.type === 'annotation' ? 'This annotation will be added to the selected module' :
+                 'This module will be added to the selected encounter'}
+              </small>
             </div>
 
             <div className="mb-4">
@@ -1029,15 +1072,22 @@ const AddModuleModal = ({
 
         <div className="modal-body">
           <div className="mb-4">
-            <label className="form-label fw-bold">Encounter ID:</label>
+            <label className="form-label fw-bold">
+              {addModuleContext?.type === 'variant' || addModuleContext?.type === 'annotation' ? 'Parent Module ID:' : 'Encounter ID:'}
+            </label>
             <div className="form-control-plaintext" style={{ 
               backgroundColor: '#f8f9fa', 
               padding: '8px 12px', 
               borderRadius: '4px',
               fontFamily: 'monospace'
             }}>
-              {encounterId}
+              {addModuleContext?.type === 'variant' || addModuleContext?.type === 'annotation' ? addModuleContext?.moduleId : encounterId}
             </div>
+            <small className="text-muted">
+              {addModuleContext?.type === 'variant' ? 'This variant will be added to the selected module' :
+               addModuleContext?.type === 'annotation' ? 'This annotation will be added to the selected module' :
+               'This module will be added to the selected encounter'}
+            </small>
           </div>
 
           <div className="mb-4">
@@ -1869,6 +1919,7 @@ const UMDFViewer = () => {
   const [selectedEncounterId, setSelectedEncounterId] = useState(null); // Track which encounter we're adding to
   const [selectedSchema, setSelectedSchema] = useState(''); // Track selected schema for new module
   const [availableSchemas, setAvailableSchemas] = useState([]); // Available schemas to choose from
+  const [addModuleContext, setAddModuleContext] = useState(null); // Track the context (encounter/variant/annotation)
   const [formData, setFormData] = useState({}); // Store form data for the new module
   const [showForm, setShowForm] = useState(false); // Control whether to show schema selection or form
   const [parsedSchema, setParsedSchema] = useState(null); // Store the parsed schema for the form
@@ -1902,6 +1953,12 @@ const UMDFViewer = () => {
     if (encounters.length > 0 && !isEditMode) {
       console.log(`🔄 Loading data for ${encounters.length} encounters (not in edit mode)`);
       console.log('📋 Encounters:', encounters);
+      
+      // Set the first encounter as selected for DICOM imports if not already set
+      if (!selectedEncounterId && encounters[0]) {
+        setSelectedEncounterId(encounters[0].encounter_id);
+        console.log('🎯 Set selected encounter ID for DICOM imports (useEffect):', encounters[0].encounter_id);
+      }
       
       encounters.forEach((encounter, encounterIndex) => {
         const { module_tree } = encounter;
@@ -2013,6 +2070,13 @@ const UMDFViewer = () => {
         setModules(result.modules);
         setEncounters(result.encounters || []);
         setModuleGraph(result.module_graph || {});
+        
+        // Set the first encounter as selected for DICOM imports
+        if (result.encounters && result.encounters.length > 0) {
+          setSelectedEncounterId(result.encounters[0].encounter_id);
+          console.log('🎯 Set selected encounter ID for DICOM imports:', result.encounters[0].encounter_id);
+        }
+        
         setShowSuccessBar(true);
         
         // Clear processing state
@@ -2265,6 +2329,26 @@ const UMDFViewer = () => {
     );
   };
 
+  // Helper function to get image type name from metadata
+  const getImageTypeName = (moduleMetadata) => {
+    try {
+      // Check if metadata has the imageType array structure
+      if (moduleMetadata && moduleMetadata.content && Array.isArray(moduleMetadata.content) && moduleMetadata.content.length > 0) {
+        const contentItem = moduleMetadata.content[0];
+        if (contentItem.imageType && Array.isArray(contentItem.imageType) && contentItem.imageType.length >= 3) {
+          return contentItem.imageType[2]; // Third element (index 2)
+        }
+      }
+      // Fallback to direct metadata access
+      if (moduleMetadata && moduleMetadata.imageType && Array.isArray(moduleMetadata.imageType) && moduleMetadata.imageType.length >= 3) {
+        return moduleMetadata.imageType[2]; // Third element (index 2)
+      }
+    } catch (error) {
+      console.log('Error extracting imageType:', error);
+    }
+    return null; // No valid imageType found
+  };
+
   // Render imaging module with image viewer and sliders
   const renderImagingModule = (module, moduleNode = null) => {
     // Check if this module has a selected variant module
@@ -2344,6 +2428,9 @@ const UMDFViewer = () => {
     const numFrames = hasExtraDimensions ? dimensions.slice(2).reduce((acc, dim) => acc * dim, 1) : 1;
     
     console.log('=== IMAGE MODULE DEBUG ===');
+    console.log('Current module ID:', currentModule.id);
+    console.log('Is variant module:', selectedVariantId ? 'Yes' : 'No');
+    console.log('Selected variant ID:', selectedVariantId);
     console.log('Metadata structure:', currentModule.metadata);
     console.log('Metadata type:', typeof currentModule.metadata);
     console.log('Metadata keys:', Object.keys(currentModule.metadata || {}));
@@ -2352,6 +2439,14 @@ const UMDFViewer = () => {
       console.log('Image structure keys:', Object.keys(currentModule.metadata.image_structure));
       console.log('Image structure dimensions:', currentModule.metadata.image_structure.dimensions);
       console.log('Image structure dimension_names:', currentModule.metadata.image_structure.dimension_names);
+    }
+    console.log('Has content array:', currentModule.metadata?.content ? 'Yes' : 'No');
+    if (currentModule.metadata?.content && Array.isArray(currentModule.metadata.content)) {
+      console.log('Content array length:', currentModule.metadata.content.length);
+      if (currentModule.metadata.content.length > 0) {
+        console.log('Content[0] keys:', Object.keys(currentModule.metadata.content[0]));
+        console.log('Content[0] has image_structure:', currentModule.metadata.content[0].image_structure ? 'Yes' : 'No');
+      }
     }
     console.log('Has direct dimensions:', currentModule.metadata?.dimensions ? 'Yes' : 'No');
     if (currentModule.metadata?.dimensions) {
@@ -2415,11 +2510,15 @@ const UMDFViewer = () => {
                       className="btn btn-sm w-100"
                                               onClick={async () => {
                           try {
+                            console.log('🔄 Switching back to original module:', module.id);
+                            console.log('🔄 Original module metadata:', module.metadata);
+                            console.log('🔄 Original module data:', module.data);
+                            
                             // Switch back to the original image module
                             setSelectedVariantModules(prev => ({...prev, [module.id]: null}));
-                            console.log('Switched to original image module:', module.id);
+                            console.log('✅ Switched to original image module:', module.id);
                           } catch (error) {
-                            console.error('Error switching to original module:', error);
+                            console.error('❌ Error switching to original module:', error);
                           }
                         }}
                       title={`Switch to ${module.name || module.type} Module`}
@@ -2435,8 +2534,19 @@ const UMDFViewer = () => {
                           border: '1px solid #667eea'
                         }}
                     >
-                      <i className="fas fa-image me-1"></i>
-                      {module.name || module.type} (Original)
+                      {(() => {
+                        const imageTypeName = getImageTypeName(module.metadata);
+                        if (imageTypeName) {
+                          return imageTypeName;
+                        } else {
+                          return (
+                            <>
+                              <i className="fas fa-image me-1"></i>
+                              {module.name || module.type} (Original)
+                            </>
+                          );
+                        }
+                      })()}
                     </button>
                     
                     {/* Variant Image Module Buttons */}
@@ -2446,17 +2556,21 @@ const UMDFViewer = () => {
                         className="btn btn-sm w-100"
                         onClick={async () => {
                           try {
+                            console.log('🔄 Switching to variant module:', variantModule.id, 'for base module:', module.id);
+                            console.log('🔄 Variant module metadata before switch:', variantModule.metadata);
+                            console.log('🔄 Variant module data before switch:', variantModule.data);
+                            
                             // Load the variant module's data first if it hasn't been loaded
                             if (!variantModule.data || Object.keys(variantModule.data).length === 0) {
-                              console.log('Loading data for variant module:', variantModule.id);
+                              console.log('🔄 Loading data for variant module:', variantModule.id);
                               await loadModule(variantModule.id);
                             }
                             
                             // Switch to the variant image module for this specific base module
                             setSelectedVariantModules(prev => ({...prev, [module.id]: variantModule.id}));
-                            console.log('Switched to variant image module:', variantModule.id, 'for base module:', module.id);
+                            console.log('✅ Switched to variant image module:', variantModule.id, 'for base module:', module.id);
                           } catch (error) {
-                            console.error('Error switching to variant module:', error);
+                            console.error('❌ Error switching to variant module:', error);
                           }
                         }}
                         title={`Switch to ${variantModule.name || variantModule.type} Module`}
@@ -2472,8 +2586,19 @@ const UMDFViewer = () => {
                           border: '1px solid #667eea'
                         }}
                       >
-                        <i className="fas fa-image me-1"></i>
-                        {variantModule.name || variantModule.type}
+                        {(() => {
+                          const imageTypeName = getImageTypeName(variantModule.metadata);
+                          if (imageTypeName) {
+                            return imageTypeName;
+                          } else {
+                            return (
+                              <>
+                                <i className="fas fa-image me-1"></i>
+                                {variantModule.name || variantModule.type}
+                              </>
+                            );
+                          }
+                        })()}
                       </button>
                     ))}
                   </div>
@@ -2876,7 +3001,7 @@ const UMDFViewer = () => {
                   console.log('=== PIXEL CONVERSION DEBUG ===');
                   console.log('Converting pixel data with numChannels:', numChannels);
                   console.log('Canvas data length:', data.length);
-                  console.log('Expected pixels to process:', Math.min(pixelData.length / numChannels, data.length / 4));
+                  console.log('Expected pixels to process:', Math.min(pixelData.lengtclh / numChannels, data.length / 4));
                   
                   if (numChannels === 1) {
                     // Grayscale: single value per pixel
@@ -3368,11 +3493,29 @@ const UMDFViewer = () => {
               return (
                 <div key={index} className="module-node mb-4">
                   <div className="card border-primary" style={{width: '100% !important', maxWidth: 'none !important', margin: '0 !important', minWidth: '100% !important'}}>
-                    <div className="card-header bg-primary text-white">
+                    <div className="card-header bg-primary text-white d-flex justify-content-between align-items-center">
                       <h5 className="mb-0">
                         <i className="fas fa-cube me-2"></i>
                         {module.name || `${capitalizeFirst(module.type)} Module`}
                       </h5>
+                      {isEditMode && (
+                        <div className="d-flex gap-2">
+                          <button 
+                            className="btn btn-outline-light btn-sm"
+                            onClick={() => handleAddVariantModule(module.id)}
+                          >
+                            <i className="fas fa-plus me-1"></i>
+                            Add Variant
+                          </button>
+                          <button 
+                            className="btn btn-outline-light btn-sm"
+                            onClick={() => handleAddAnnotationModule(module.id)}
+                          >
+                            <i className="fas fa-plus me-1"></i>
+                            Add Annotation
+                          </button>
+                        </div>
+                      )}
                     </div>
                     <div className="card-body py-4">
                       <div className="module-info-container mb-4">
@@ -3446,7 +3589,15 @@ const UMDFViewer = () => {
                       
                                               {(() => {
                           // Each module shows its own metadata - no cross-module dependencies
-                          const metadataToShow = module.metadata;
+                          // For image modules with variants, check if we have a selected variant
+                          let metadataToShow = module.metadata;
+                          if ((module.type === 'image' || module.type === 'imaging') && selectedVariantModules[module.id]) {
+                            // Find the variant module and use its metadata
+                            const variantModule = modules.find(m => m.id === selectedVariantModules[module.id]);
+                            if (variantModule) {
+                              metadataToShow = variantModule.metadata;
+                            }
+                          }
                         
                         const hasMetadataError = metadataToShow && metadataToShow.error;
                         const hasDataError = module.data && module.data.error;
@@ -3920,13 +4071,14 @@ const UMDFViewer = () => {
     }
   };
 
-  // Handle adding a new module to a specific encounter
-  const handleAddModuleToEncounter = async (encounterId) => {
+  // Base function to open add module modal with different contexts
+  const openAddModuleModal = async (context) => {
     try {
-      console.log('➕ Add Module: Opening add module modal for encounter:', encounterId);
+      console.log('➕ Add Module: Opening add module modal with context:', context);
       
-      // Set the selected encounter and open the modal
-      setSelectedEncounterId(encounterId);
+      // Set the context and open the modal
+      setAddModuleContext(context);
+      setSelectedEncounterId(context.encounterId);
       setShowAddModuleModal(true);
       
       // Load available schemas if we haven't already
@@ -3940,6 +4092,58 @@ const UMDFViewer = () => {
       setShowErrorBar(true);
       setTimeout(() => setShowErrorBar(false), 3000);
     }
+  };
+
+  // Handle adding a new module to a specific encounter
+  const handleAddModuleToEncounter = async (encounterId) => {
+    await openAddModuleModal({ 
+      type: 'encounter', 
+      encounterId: encounterId 
+    });
+  };
+
+  // Handle adding a variant module to a specific module
+  const handleAddVariantModule = async (moduleId) => {
+    console.log('🔍 Add Variant Module - Module ID:', moduleId);
+    console.log('🔍 Module ID type:', typeof moduleId);
+    console.log('🔍 Module ID length:', moduleId ? moduleId.length : 'undefined');
+    
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(moduleId)) {
+      console.error('❌ Invalid UUID format for module ID:', moduleId);
+      setErrorMessage('Invalid module ID format.');
+      setShowErrorBar(true);
+      setTimeout(() => setShowErrorBar(false), 3000);
+      return;
+    }
+    
+    await openAddModuleModal({ 
+      type: 'variant', 
+      moduleId: moduleId 
+    });
+  };
+
+  // Handle adding an annotation module to a specific module
+  const handleAddAnnotationModule = async (moduleId) => {
+    console.log('🔍 Add Annotation Module - Module ID:', moduleId);
+    console.log('🔍 Module ID type:', typeof moduleId);
+    console.log('🔍 Module ID length:', moduleId ? moduleId.length : 'undefined');
+    
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(moduleId)) {
+      console.error('❌ Invalid UUID format for module ID:', moduleId);
+      setErrorMessage('Invalid module ID format.');
+      setShowErrorBar(true);
+      setTimeout(() => setShowErrorBar(false), 3000);
+      return;
+    }
+    
+    await openAddModuleModal({ 
+      type: 'annotation', 
+      moduleId: moduleId 
+    });
   };
 
   // Toggle encounter collapse state
@@ -3982,6 +4186,7 @@ const UMDFViewer = () => {
     setFormData({});
     setShowForm(false);
     setParsedSchema(null);
+    setAddModuleContext(null);
   };
 
   // Handle schema selection change
@@ -4480,8 +4685,8 @@ const UMDFViewer = () => {
 
   // Handle module creation confirmation
   const handleConfirmAddModule = async () => {
-    if (!selectedSchema || !selectedEncounterId) {
-      setErrorMessage('Please select a schema and encounter.');
+    if (!selectedSchema || !addModuleContext) {
+      setErrorMessage('Please select a schema and context.');
       setShowErrorBar(true);
       setTimeout(() => setShowErrorBar(false), 3000);
       return;
@@ -4495,7 +4700,7 @@ const UMDFViewer = () => {
     }
 
     try {
-      console.log('➕ Creating module with schema:', selectedSchema, 'for encounter:', selectedEncounterId);
+      console.log('➕ Creating module with schema:', selectedSchema, 'for context:', addModuleContext);
       console.log('📋 Form data to send:', formData);
       setProcessingMessage('Creating new module...');
       
@@ -4513,9 +4718,18 @@ const UMDFViewer = () => {
       
       // Create FormData for the request
       const formDataToSend = new FormData();
-      formDataToSend.append('encounter_id', selectedEncounterId);
+      formDataToSend.append('encounter_id', addModuleContext.encounterId);
       formDataToSend.append('schema_path', selectedSchema);
       formDataToSend.append('module_data', JSON.stringify(moduleDataToSend));
+      
+      // Add context-specific parameters
+      if (addModuleContext.type === 'variant' && addModuleContext.moduleId) {
+        formDataToSend.append('parent_module_id', addModuleContext.moduleId);
+        formDataToSend.append('relationship_type', 'variant');
+      } else if (addModuleContext.type === 'annotation' && addModuleContext.moduleId) {
+        formDataToSend.append('parent_module_id', addModuleContext.moduleId);
+        formDataToSend.append('relationship_type', 'annotation');
+      }
       
       // Send the request to the backend
       const response = await fetch('/api/create-module', {
@@ -4551,7 +4765,7 @@ const UMDFViewer = () => {
           console.log('🔍 DEBUG: Creating new module with:');
           console.log('  - module_id:', result.module_id);
           console.log('  - selectedSchema:', selectedSchema);
-          console.log('  - selectedEncounterId:', selectedEncounterId);
+          console.log('  - context:', addModuleContext);
           console.log('  - filePath:', filePath);
           
           // Extract the title from the parsed schema, fallback to filename if no title
@@ -4585,7 +4799,7 @@ const UMDFViewer = () => {
           // Add the new module to the encounter's module tree
           setEncounters(prevEncounters => {
             const updatedEncounters = prevEncounters.map(encounter => 
-              encounter.encounter_id === selectedEncounterId
+              encounter.encounter_id === addModuleContext.encounterId
                 ? {
                     ...encounter,
                     module_tree: [
@@ -4603,7 +4817,7 @@ const UMDFViewer = () => {
           });
           
           console.log('✅ Added new module to modules list:', newModule);
-          console.log('✅ Added new module to encounter module tree for encounter:', selectedEncounterId);
+          console.log('✅ Added new module to encounter module tree for encounter:', addModuleContext.encounterId);
           
           // Debug: Check the current state after updates
           setTimeout(() => {
@@ -5123,10 +5337,31 @@ const UMDFViewer = () => {
                 // Fallback to old module display if no encounters
                 modules.map((module, index) => (
                   <div key={index} className="card mb-4" style={{maxWidth: '95vw', margin: '0 auto'}}>
-                    <div className="card-body px-4 py-2">
-                      <h4 className="card-title mb-3">
+                    <div className="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                      <h5 className="mb-0">
+                        <i className="fas fa-cube me-2"></i>
                         {module.name || `${capitalizeFirst(module.type)} Module`}
-                      </h4>
+                      </h5>
+                      {isEditMode && (
+                        <div className="d-flex gap-2">
+                          <button 
+                            className="btn btn-outline-light btn-sm"
+                            onClick={() => handleAddVariantModule(module.id)}
+                          >
+                            <i className="fas fa-plus me-1"></i>
+                            Add Variant
+                          </button>
+                          <button 
+                            className="btn btn-outline-light btn-sm"
+                            onClick={() => handleAddAnnotationModule(module.id)}
+                          >
+                            <i className="fas fa-plus me-1"></i>
+                            Add Annotation
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="card-body px-4 py-2">
                       
                       <div className="row mb-3">
                         <div className="col-md-6">
@@ -5355,6 +5590,7 @@ const UMDFViewer = () => {
         encounterId={selectedEncounterId}
         availableSchemas={availableSchemas}
         selectedSchema={selectedSchema}
+        addModuleContext={addModuleContext}
         onSchemaChange={handleSchemaChange}
         onConfirm={handleConfirmAddModule}
         onSchemaConfirm={handleSchemaConfirm}
